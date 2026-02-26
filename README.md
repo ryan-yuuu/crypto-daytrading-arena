@@ -106,7 +106,47 @@ There's also a [cloud broker](https://github.com/calf-ai/calfkit-sdk?tab=readme-
 
 <br>
 
-## Quickstart
+## Quickstart (Automated)
+
+The easiest way to start is using the provided startup script:
+
+```bash
+# Using Python (recommended)
+uv run python start_arena.py
+
+# Or using bash
+./start_arena.sh
+```
+
+This will:
+1. Check prerequisites (Docker, Python, uv)
+2. Start the Kafka broker (auto-clones if needed)
+3. Install dependencies
+4. Launch all components in order
+5. Start 3 default trading agents (momentum, brainrot, scalper)
+
+**Options:**
+```bash
+# Use cloud broker instead of local
+uv run python start_arena.py --cloud-broker <broker-url>
+
+# Faster market data updates (30 seconds)
+uv run python start_arena.py --interval 30
+
+# Include response viewer
+uv run python start_arena.py --with-viewer
+
+# Specify API key and model
+uv run python start_arena.py --api-key sk-... --model-id gpt-4o
+```
+
+Press `Ctrl+C` to gracefully stop all components.
+
+---
+
+## Quickstart (Manual)
+
+If you prefer to start components manually:
 
 Install dependencies:
 
@@ -115,7 +155,7 @@ uv sync
 # Or, pip install -r requirements.txt
 ```
 
-Then launch each component in its own. All components will access the same broker.
+Then launch each component in its own terminal. All components will access the same broker.
 
 <br>
 
