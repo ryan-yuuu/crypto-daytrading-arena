@@ -1,0 +1,46 @@
+{
+  "_comment": "Copy this file to config.json and fill in your API keys. Use ${ENV_VAR} syntax to reference environment variables, or embed keys directly.",
+  "llm_providers": {
+    "openai": {
+      "api_key": "",
+      "base_url": "https://api.openai.com/v1",
+      "default_model": "gpt-4o-mini"
+    },
+    "anthropic": {
+      "api_key": "",
+      "base_url": "https://api.anthropic.com/v1",
+      "default_model": "claude-3-sonnet-20240229"
+    },
+    "openrouter": {
+      "api_key": "",
+      "base_url": "https://openrouter.ai/api/v1",
+      "default_model": "anthropic/claude-3.5-sonnet"
+    }
+  },
+  "chat_nodes": [
+    {
+      "name": "gpt4o",
+      "provider": "openai",
+      "model": "gpt-4o",
+      "max_workers": 1
+    },
+    {
+      "name": "claude",
+      "provider": "anthropic",
+      "model": "claude-3-opus-20240229",
+      "max_workers": 1
+    }
+  ],
+  "trading": {
+    "binance_symbols": [
+      "BTCUSDT",
+      "SOLUSDT",
+      "FARTCOINUSDT"
+    ],
+    "coinbase_products": [
+      "BTC-USD",
+      "SOL-USD",
+      "FARTCOIN-USD"
+    ]
+  }
+}

@@ -35,17 +35,22 @@ from calfkit.broker.broker import BrokerClient
 from calfkit.nodes.agent_router_node import AgentRouterNode
 from calfkit.runners.service_client import RouterServiceClient
 from binance_consumer import CandleBook, poll_rest
+from config import get_default_symbols
 
 logger = logging.getLogger(__name__)
 
 BINANCE_WS_URL = "wss://stream.binance.com:9443"
 BINANCE_WS_URL_FALLBACK = "wss://stream.binance.com:443"
 
-DEFAULT_SYMBOLS = [
-    "BTCUSDT",
-    "FARTCOINUSDT",
-    "SOLUSDT",
-]
+# Load defaults from config if available
+try:
+    DEFAULT_SYMBOLS = get_default_symbols("binance")
+except Exception:
+    DEFAULT_SYMBOLS = [
+        "BTCUSDT",
+        "FARTCOINUSDT",
+        "SOLUSDT",
+    ]
 
 RECONNECT_DELAY_SECONDS = 3
 PING_INTERVAL_SECONDS = 30  # Must send ping within 60 seconds per Binance docs
@@ -96,6 +101,8 @@ class BinanceKafkaConnector:
         min_publish_interval: float = 0.0,
         candle_book: Optional[CandleBook] = None,
     ) -> None:
+        if not symbols:
+            raise ValueError("At least one symbol must be specified")
         self._broker = broker
         self._client = RouterServiceClient(broker, router_node)
         self._symbols = symbols
@@ -162,7 +169,7 @@ class BinanceKafkaConnector:
                     data["E"] / 1000, tz=__import__("datetime").timezone.utc
                 ).isoformat(),
             )
-        except (KeyError, ValueError) as e:
+        except Exception as e:
             logger.error("Failed to parse ticker data: %s (data: %s)", e, data)
             return None
 
@@ -366,10 +373,15 @@ def parse_args(argv: Optional[list[str]] | None = None) -> argparse.Namespace:
         help="Kafka bootstrap servers (default: $KAFKA_BOOTSTRAP_SERVERS or localhost:9092).",
     )
     parser.add_argument(
+        "--config",
+        default="config.json",
+        help="Path to config file for symbols (default: config.json).",
+    )
+    parser.add_argument(
         "--symbols",
         nargs="+",
-        default=DEFAULT_SYMBOLS,
-        help="Binance symbols to subscribe to (default: %(default)s).",
+        default=None,
+        help="Binance symbols to subscribe to (overrides config).",
     )
     parser.add_argument(
         "--min-interval",
@@ -391,11 +403,21 @@ def parse_args(argv: Optional[list[str]] | None = None) -> argparse.Namespace:
 
 
 async def run(args: argparse.Namespace, router_node: AgentRouterNode) -> None:
+    # Load symbols from config if not provided via CLI
+    symbols = args.symbols
+    if symbols is None:
+        from config import load_config
+        try:
+            config = load_config(args.config)
+            symbols = config.trading.binance_symbols
+        except Exception:
+            symbols = DEFAULT_SYMBOLS
+
     broker = BrokerClient(bootstrap_servers=args.bootstrap_servers)
     connector = BinanceKafkaConnector(
         broker=broker,
         router_node=router_node,
-        symbols=args.symbols,
+        symbols=symbols,
         min_publish_interval=args.min_interval,
     )
 
@@ -406,7 +428,7 @@ async def run(args: argparse.Namespace, router_node: AgentRouterNode) -> None:
     logger.info("Starting Binance -> Kafka connector")
     logger.info("  Router topic:  %s", router_node.subscribed_topic)
     logger.info("  Broker:        %s", args.bootstrap_servers)
-    logger.info("  Symbols:       %s", ", ".join(args.symbols))
+    logger.info("  Symbols:       %s", ", ".join(symbols))
     logger.info("  Min interval:  %ss", args.min_interval)
 
     await connector.start()

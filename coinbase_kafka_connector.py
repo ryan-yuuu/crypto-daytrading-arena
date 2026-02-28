@@ -34,16 +34,21 @@ from calfkit.broker.broker import BrokerClient
 from calfkit.nodes.agent_router_node import AgentRouterNode
 from calfkit.runners.service_client import RouterServiceClient
 from coinbase_consumer import CandleBook, poll_rest
+from config import get_default_symbols
 
 logger = logging.getLogger(__name__)
 
 COINBASE_WS_URL = "wss://ws-feed.exchange.coinbase.com"
 
-DEFAULT_PRODUCTS = [
-    "BTC-USD",
-    "FARTCOIN-USD",
-    "SOL-USD",
-]
+# Load defaults from config if available
+try:
+    DEFAULT_PRODUCTS = get_default_symbols("coinbase")
+except Exception:
+    DEFAULT_PRODUCTS = [
+        "BTC-USD",
+        "FARTCOIN-USD",
+        "SOL-USD",
+    ]
 
 RECONNECT_DELAY_SECONDS = 3
 
@@ -92,6 +97,8 @@ class CoinbaseKafkaConnector:
         min_publish_interval: float = 0.0,
         candle_book: CandleBook | None = None,
     ) -> None:
+        if not products:
+            raise ValueError("At least one product must be specified")
         self._broker = broker
         self._client = RouterServiceClient(broker, router_node)
         self._products = products
@@ -265,10 +272,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Kafka bootstrap servers (default: $KAFKA_BOOTSTRAP_SERVERS or localhost:9092).",
     )
     parser.add_argument(
+        "--config",
+        default="config.json",
+        help="Path to config file for products (default: config.json).",
+    )
+    parser.add_argument(
         "--products",
         nargs="+",
-        default=DEFAULT_PRODUCTS,
-        help="Coinbase product IDs to subscribe to (default: %(default)s).",
+        default=None,
+        help="Coinbase product IDs to subscribe to (overrides config).",
     )
     parser.add_argument(
         "--min-interval",
@@ -290,11 +302,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 async def run(args: argparse.Namespace, router_node: AgentRouterNode) -> None:
+    # Load products from config if not provided via CLI
+    products = args.products
+    if products is None:
+        from config import load_config
+        try:
+            config = load_config(args.config)
+            products = config.trading.coinbase_products
+        except Exception:
+            products = DEFAULT_PRODUCTS
+
     broker = BrokerClient(bootstrap_servers=args.bootstrap_servers)
     connector = CoinbaseKafkaConnector(
         broker=broker,
         router_node=router_node,
-        products=args.products,
+        products=products,
         min_publish_interval=args.min_interval,
     )
 
@@ -305,7 +327,7 @@ async def run(args: argparse.Namespace, router_node: AgentRouterNode) -> None:
     logger.info("Starting Coinbase -> Kafka connector")
     logger.info("  Router topic:  %s", router_node.subscribed_topic)
     logger.info("  Broker:        %s", args.bootstrap_servers)
-    logger.info("  Products:      %s", ", ".join(args.products))
+    logger.info("  Products:      %s", ", ".join(products))
     logger.info("  Min interval:  %ss", args.min_interval)
 
     await connector.start()

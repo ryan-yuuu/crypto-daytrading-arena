@@ -38,6 +38,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from config import load_config, ArenaConfig, ChatNodeConfig
+
 # ANSI colors for terminal output
 COLORS = {
     "reset": "\033[0m",
@@ -101,7 +103,18 @@ class ArenaStartupManager:
         self.logs_dir = Path("logs")
         self.broker_dir = Path("../calfkit-broker")
         self.running = True
+        self.config: Optional[ArenaConfig] = None
+        self._load_config()
         self._setup_signal_handlers()
+
+    def _load_config(self) -> None:
+        """Load configuration from file."""
+        try:
+            self.config = load_config(self.args.config)
+            log(f"Loaded config from {self.args.config}", "success")
+        except Exception as e:
+            log(f"Warning: Could not load config: {e}", "warning")
+            self.config = None
 
     def _setup_signal_handlers(self) -> None:
         """Setup handlers for graceful shutdown."""
@@ -371,12 +384,13 @@ class ArenaStartupManager:
         log("Starting Coinbase Connector", "header")
 
         cmd = [
-            "uv", "run", "python", "coinbase_connector.py",
+            "uv", "run", "python", "coinbase_kafka_connector.py",
             "--bootstrap-servers", self.broker_url,
+            "--config", self.args.config,
         ]
 
         if self.args.interval:
-            cmd.extend(["--interval", str(self.args.interval)])
+            cmd.extend(["--min-interval", str(self.args.interval)])
 
         return self._start_component("coinbase-connector", cmd)
 
@@ -391,33 +405,81 @@ class ArenaStartupManager:
 
         return self._start_component("tools-dashboard", cmd)
 
-    def start_chat_node(self) -> bool:
-        """Start the ChatNode for LLM inference."""
-        log("Starting ChatNode (LLM)", "header")
+    def start_chat_nodes(self) -> list[str]:
+        """Start ChatNode(s) for LLM inference.
 
-        if not self.api_key:
-            log("No API key provided, skipping ChatNode", "warning")
-            log("Set OPENAI_API_KEY or use --api-key to enable", "debug")
-            return False
+        If config has chat_nodes defined, start all configured nodes.
+        Otherwise, start a single default node.
 
-        model_id = self.args.model_id or "gpt-4o-mini"
-        chat_node_name = "default-chat"
+        Returns:
+            List of started chat node names.
+        """
+        log("Starting ChatNode(s) (LLM)", "header")
 
-        cmd = [
-            "uv", "run", "python", "deploy_chat_node.py",
-            "--name", chat_node_name,
-            "--model-id", model_id,
-            "--bootstrap-servers", self.broker_url,
-            "--api-key", self.api_key,
-        ]
+        started_nodes: list[str] = []
 
-        if self.args.reasoning_effort:
-            cmd.extend(["--reasoning-effort", self.args.reasoning_effort])
+        # Check if we have config-based chat nodes
+        if self.config and self.config.chat_nodes:
+            log(f"Found {len(self.config.chat_nodes)} ChatNode(s) in config", "info")
 
-        return self._start_component("chat-node", cmd)
+            for node_config in self.config.chat_nodes:
+                # Get provider config
+                provider_config = self.config.get_provider_config(node_config.provider)
+                if not provider_config:
+                    log(f"Provider '{node_config.provider}' not configured for node '{node_config.name}'", "error")
+                    continue
 
-    def start_agent_routers(self) -> bool:
-        """Start default agent routers with different strategies."""
+                if not provider_config.api_key:
+                    log(f"No API key for provider '{node_config.provider}', skipping node '{node_config.name}'", "warning")
+                    continue
+
+                cmd = [
+                    "uv", "run", "python", "deploy_chat_node.py",
+                    "--from-config", node_config.name,
+                    "--bootstrap-servers", self.broker_url,
+                    "--config-path", self.args.config,
+                ]
+
+                component_name = f"chat-node-{node_config.name}"
+                if self._start_component(component_name, cmd):
+                    started_nodes.append(node_config.name)
+                    time.sleep(1)  # Small delay between node starts
+
+            if not started_nodes:
+                log("No ChatNodes could be started from config", "error")
+        else:
+            # Fall back to legacy single ChatNode
+            if not self.api_key:
+                log("No API key provided, skipping ChatNode", "warning")
+                log("Set OPENAI_API_KEY or use --api-key to enable", "debug")
+                return []
+
+            model_id = self.args.model_id or "gpt-4o-mini"
+            chat_node_name = "default-chat"
+
+            cmd = [
+                "uv", "run", "python", "deploy_chat_node.py",
+                "--name", chat_node_name,
+                "--model-id", model_id,
+                "--bootstrap-servers", self.broker_url,
+                "--api-key", self.api_key,
+                "--config-path", self.args.config,
+            ]
+
+            if self.args.reasoning_effort:
+                cmd.extend(["--reasoning-effort", self.args.reasoning_effort])
+
+            if self._start_component("chat-node", cmd):
+                started_nodes.append(chat_node_name)
+
+        return started_nodes
+
+    def start_agent_routers(self, chat_node_names: list[str]) -> bool:
+        """Start default agent routers with different strategies.
+
+        Args:
+            chat_node_names: List of available chat node names to distribute agents across.
+        """
         log("Starting Agent Routers", "header")
 
         agents = [
@@ -426,10 +488,17 @@ class ArenaStartupManager:
             ("scalper-trader", "scalper"),
         ]
 
-        chat_node_name = "default-chat"
-        all_started = True
+        # If no chat nodes available, can't start agents
+        if not chat_node_names:
+            log("No ChatNodes available, cannot start agents", "error")
+            return False
 
-        for agent_name, strategy in agents:
+        # Distribute agents across available chat nodes
+        all_started = True
+        for i, (agent_name, strategy) in enumerate(agents):
+            # Round-robin assign to chat nodes
+            chat_node_name = chat_node_names[i % len(chat_node_names)]
+
             cmd = [
                 "uv", "run", "python", "deploy_router_node.py",
                 "--name", agent_name,
@@ -513,12 +582,15 @@ class ArenaStartupManager:
             "agent-momentum-trader",
             "agent-brainrot-trader",
             "agent-scalper-trader",
-            "chat-node",
             "response-viewer",
             "tools-dashboard",
             "coinbase-connector",
             "broker",
         ]
+
+        # Add chat nodes to stop order (match any component starting with "chat-node")
+        chat_node_components = [name for name in self.components if name.startswith("chat-")]
+        stop_order = chat_node_components + stop_order
 
         for name in stop_order:
             if name not in self.components:
@@ -621,17 +693,18 @@ class ArenaStartupManager:
                 self.shutdown()
                 return 1
 
-        # Phase 6: ChatNode (LLM)
+        # Phase 6: ChatNode(s) (LLM)
         time.sleep(2)
 
-        if not self.start_chat_node():
-            log("ChatNode not started (no API key)", "warning")
-            log("Agents will not work without ChatNode", "warning")
+        chat_node_names = self.start_chat_nodes()
+        if not chat_node_names:
+            log("No ChatNodes started (check API keys in config or env)", "warning")
+            log("Agents will not work without ChatNodes", "warning")
         else:
-            # Phase 7: Agent Routers (only if ChatNode started)
-            time.sleep(3)  # Wait for ChatNode to be ready
+            # Phase 7: Agent Routers (only if ChatNodes started)
+            time.sleep(3)  # Wait for ChatNodes to be ready
 
-            if not self.start_agent_routers():
+            if not self.start_agent_routers(chat_node_names):
                 log("Some agents failed to start", "warning")
 
         # Phase 8: Optional components
@@ -675,6 +748,12 @@ Environment Variables:
         "--broker-url",
         default=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
         help="Kafka broker URL (default: localhost:9092 or $KAFKA_BOOTSTRAP_SERVERS)",
+    )
+
+    parser.add_argument(
+        "--config",
+        default="config.json",
+        help="Path to configuration file (default: config.json)",
     )
 
     parser.add_argument(

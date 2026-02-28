@@ -11,6 +11,8 @@ Example:
     uv run python deploy_chat_node.py \
         --name deepseek --model-id deepseek-chat --bootstrap-servers <broker-url> \
         --base-url https://api.deepseek.com/v1 --api-key $DEEPSEEK_API_KEY
+
+    uv run python deploy_chat_node.py --from-config gpt4o --bootstrap-servers <broker-url>
 """
 
 import argparse
@@ -25,6 +27,8 @@ from calfkit.nodes.chat_node import ChatNode
 from calfkit.providers.pydantic_ai.openai import OpenAIModelClient
 from calfkit.runners.service import NodesService
 
+from config import load_config, PROVIDER_DEFAULTS
+
 load_dotenv()
 
 
@@ -34,12 +38,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--name",
-        required=True,
         help="ChatNode name (becomes private topic ai_prompted.<name>)",
     )
     parser.add_argument(
         "--model-id",
-        required=True,
         help="Model ID passed to OpenAIModelClient (e.g. gpt-5-nano, deepseek-chat)",
     )
     parser.add_argument(
@@ -68,17 +70,62 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help='Reasoning effort for reasoning models (e.g. "low")',
     )
+    parser.add_argument(
+        "--from-config",
+        metavar="NODE_NAME",
+        dest="from_config",
+        help="Load ChatNode configuration from config.json by name",
+    )
+    parser.add_argument(
+        "--config-path",
+        default="config.json",
+        help="Path to config file (default: config.json)",
+    )
     return parser.parse_args()
 
 
 async def main() -> None:
     args = parse_args()
 
-    # Resolve API key: explicit flag > env var
+    # Handle config-based deployment
+    if args.from_config:
+        config = load_config(args.config_path)
+        node_config = config.get_chat_node_config(args.from_config)
+        if not node_config:
+            print(f"ERROR: ChatNode '{args.from_config}' not found in config.")
+            print(f"Available nodes: {[n.name for n in config.chat_nodes]}")
+            sys.exit(1)
+
+        # Set values from config
+        args.name = node_config.name
+        args.model_id = node_config.model
+        args.max_workers = node_config.max_workers
+        args.reasoning_effort = node_config.reasoning_effort
+
+        # Get provider config
+        provider_config = config.get_provider_config(node_config.provider)
+        if provider_config:
+            args.api_key = provider_config.api_key or args.api_key
+            args.base_url = provider_config.base_url or args.base_url
+            # Use config default model if not specified in node config
+            if not args.model_id and provider_config.default_model:
+                args.model_id = provider_config.default_model
+        else:
+            print(f"WARNING: Provider '{node_config.provider}' not configured. Using CLI/env values.")
+
+    # Validate required args (either from CLI or config)
+    if not args.name:
+        print("ERROR: --name is required (or use --from-config)")
+        sys.exit(1)
+    if not args.model_id:
+        print("ERROR: --model-id is required (or use --from-config with configured model)")
+        sys.exit(1)
+
+    # Resolve API key: explicit flag > config > env var
     api_key = args.api_key or os.getenv("OPENAI_API_KEY")
     if not api_key:
         print("ERROR: No API key provided.")
-        print("Pass --api-key or set OPENAI_API_KEY.")
+        print("Pass --api-key, set in config, or set OPENAI_API_KEY.")
         sys.exit(1)
 
     print("=" * 50)
