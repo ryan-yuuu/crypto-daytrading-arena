@@ -59,9 +59,9 @@ cp config.example.json config.json
 
 ---
 
-## start_arena.py / start_arena.sh
+## start_arena.py
 
-Automated startup that launches all components in the correct order. `start_arena.sh` is a thin wrapper around `start_arena.py`.
+Automated startup that launches all components in the correct order.
 
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
@@ -95,8 +95,6 @@ uv run python start_arena.py --cloud-broker broker.example.com:9092
 # Fast updates with all features
 uv run python start_arena.py --interval 30 --with-viewer
 
-# Using bash version
-./start_arena.sh --interval 30 --with-viewer
 ```
 
 ---

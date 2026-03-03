@@ -111,11 +111,7 @@ There's also a [cloud broker](https://github.com/calf-ai/calfkit-sdk?tab=readme-
 The easiest way to start is using the provided startup script:
 
 ```bash
-# Using Python (recommended)
 uv run python start_arena.py
-
-# Or using bash
-./start_arena.sh
 ```
 
 This will:
