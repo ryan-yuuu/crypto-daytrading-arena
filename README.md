@@ -160,9 +160,9 @@ uv run python deploy/chat_node.py \
 
 <br>
 
-### 4. Deploy agent routers
+### 4. Deploy agents
 
-Deploy one router per agent. Each targets a ChatNode you define by name and uses a trading strategy you can edit in `arena/strategies.py`. See `arena/strategies.py` for the full system prompts.
+Deploy an agent that targets a ChatNode you define by name and uses a trading strategy you can edit in `arena/strategies.py`. See `arena/strategies.py` for the full system prompts.
 
 ```bash
 uv run python deploy/router_node.py \
