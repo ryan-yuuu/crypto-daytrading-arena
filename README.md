@@ -106,48 +106,7 @@ There's also a [cloud broker](https://github.com/calf-ai/calfkit-sdk?tab=readme-
 
 <br>
 
-## Quickstart (Automated)
-
-The easiest way to start is using the provided startup script:
-
-```bash
-uv run python start_arena.py
-```
-
-This will:
-1. Check prerequisites (Docker, Python, uv)
-2. Start the Kafka broker (auto-clones if needed)
-3. Install dependencies
-4. Launch all components in order
-5. Start 3 default trading agents (momentum, brainrot, scalper)
-
-**Options:**
-```bash
-# Use Binance instead of Coinbase
-uv run python start_arena.py --exchange binance
-
-# Use cloud broker instead of local
-uv run python start_arena.py --cloud-broker <broker-url>
-
-# Faster market data updates (30 seconds)
-uv run python start_arena.py --interval 30
-
-# Include response viewer
-uv run python start_arena.py --with-viewer
-
-# Specify API key and model
-uv run python start_arena.py --api-key sk-... --model-id gpt-4o
-```
-
-Press `Ctrl+C` to gracefully stop all components.
-
-<br>
-
----
-
-## Quickstart (Manual)
-
-If you prefer to start components manually:
+## Quickstart
 
 Install dependencies:
 
@@ -166,10 +125,10 @@ Start either the Coinbase or Binance connector to stream live market data:
 
 ```bash
 # Coinbase (default)
-uv run python coinbase_kafka_connector.py --bootstrap-servers <broker-url>
+uv run python exchanges/coinbase.py --bootstrap-servers <broker-url>
 
 # Binance
-uv run python binance_kafka_connector.py --bootstrap-servers <broker-url>
+uv run python exchanges/binance.py --bootstrap-servers <broker-url>
 ```
 
 Optional: You can use the `--min-interval <seconds>` flag which controls how often agents are fed market data (default: 60s). Note that candle data is only updated every 60 seconds due to Coinbase API restrictions, so intervals below a minute mean agents will receive updated live pricing (bid/ask spread, ~5s granularity) but the same candle data.
@@ -179,8 +138,8 @@ Optional: You can use the `--min-interval <seconds>` flag which controls how oft
 ### 2. Deploy tools & dashboard
 
 ```bash
-uv run python tools_and_dashboard.py --bootstrap-servers <broker-url>
-# Or, source .venv/bin/activate && python tools_and_dashboard.py --bootstrap-servers <broker-url>
+uv run python deploy/tools_and_dashboard.py --bootstrap-servers <broker-url>
+# Or, source .venv/bin/activate && python deploy/tools_and_dashboard.py --bootstrap-servers <broker-url>
 ```
 
 <br>
@@ -192,16 +151,16 @@ Note: ChatNodes are stateless so multiple agents can share the same ChatNode.
 
 ```bash
 # OpenAI model
-uv run python deploy_chat_node.py \
+uv run python deploy/chat_node.py \
     --name <unique-name-of-chatnode> --model-id <openai-model-id> --bootstrap-servers <broker-url> \
     --reasoning-effort <optional-reasoning-level> --api-key <api-key>
 
 # Or, OpenAI-compatible provider (e.g. DeepInfra, Gemini, etc.)
-uv run python deploy_chat_node.py \
+uv run python deploy/chat_node.py \
     --name <unique-name-of-chatnode> --model-id <model-id> --bootstrap-servers <broker-url> \
     --base-url <llm-provider-base-url> --reasoning-effort <optional-reasoning-level> --api-key <api-key>
 
-# Or, source .venv/bin/activate && python deploy_chat_node.py \
+# Or, source .venv/bin/activate && python deploy/chat_node.py \
 #     --name <unique-name-of-chatnode> --model-id <model-id> --bootstrap-servers <broker-url> \
 #     --api-key <api-key>
 ```
@@ -210,14 +169,14 @@ uv run python deploy_chat_node.py \
 
 ### 4. Deploy agent routers
 
-Deploy one router per agent. Each targets a ChatNode you define by name and uses a trading strategy you can edit in `deploy_router_node.py`. See `deploy_router_node.py` for the full system prompts.
+Deploy one router per agent. Each targets a ChatNode you define by name and uses a trading strategy you can edit in `arena/strategies.py`. See `arena/strategies.py` for the full system prompts.
 
 ```bash
-uv run python deploy_router_node.py \
+uv run python deploy/router_node.py \
     --name <unique-agent-name> --chat-node-name <name-of-chatnode> \
     --strategy <strategy> --bootstrap-servers <broker-url>
 
-# Or, source .venv/bin/activate && python deploy_router_node.py \
+# Or, source .venv/bin/activate && python deploy/router_node.py \
 #     --name <unique-agent-name> --chat-node-name <name-of-chatnode> \
 #     --strategy <strategy> --bootstrap-servers <broker-url>
 ```
@@ -231,8 +190,8 @@ Once agent routers are deployed, market data flows to the agents and trades shou
 A live dashboard that shows all agent activity, such as tool calls, text responses (agent reasoning), and tool results, as they happen.
 
 ```bash
-uv run python response_viewer.py --bootstrap-servers <broker-url>
-# Or, source .venv/bin/activate && python response_viewer.py --bootstrap-servers <broker-url>
+uv run python deploy/response_viewer.py --bootstrap-servers <broker-url>
+# Or, source .venv/bin/activate && python deploy/response_viewer.py --bootstrap-servers <broker-url>
 ```
 
 <br>
@@ -247,7 +206,7 @@ All trades and periodic portfolio snapshots are automatically saved to CSV files
 You can configure the snapshot interval and output directory:
 
 ```bash
-uv run python tools_and_dashboard.py \
+uv run python deploy/tools_and_dashboard.py \
     --bootstrap-servers <broker-url> \
     --snapshot-interval <default-600-seconds> \
     --data-dir ./data
@@ -279,6 +238,6 @@ For full CLI flags and options, see [CLI_REFERENCE.md](docs/CLI_REFERENCE.md).
 
 | File | Constant | Default | Description |
 |------|----------|---------|-------------|
-| `trading_tools.py` | `INITIAL_CASH` | `100_000.0` | Starting cash balance per agent |
-| `coinbase_kafka_connector.py` | `DEFAULT_PRODUCTS` | 3 products | Coinbase products tracked by the price feed |
-| `binance_kafka_connector.py` | `DEFAULT_SYMBOLS` | 3 symbols | Binance symbols tracked by the price feed |
+| `arena/models.py` | `INITIAL_CASH` | `100_000.0` | Starting cash balance per agent |
+| `exchanges/coinbase.py` | `DEFAULT_PRODUCTS` | 3 products | Coinbase products tracked by the price feed |
+| `exchanges/binance.py` | `DEFAULT_SYMBOLS` | 3 symbols | Binance symbols tracked by the price feed |

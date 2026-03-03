@@ -7,11 +7,11 @@ from rich.live import Live
 
 from calfkit.broker.broker import BrokerClient
 from calfkit.runners.service import NodesService
-from coinbase_kafka_connector import (
+from exchanges import (
     PRICE_TOPIC,
     TickerMessage,
 )
-from trading_tools import (
+from arena.tools import (
     calculator,
     execute_trade,
     get_portfolio,
@@ -27,7 +27,7 @@ from trading_tools import (
 # tools read from when executing trades.
 #
 # Usage:
-#     uv run python examples/daytrading_agents_arena/tools_and_dashboard.py
+#     uv run python deploy/tools_and_dashboard.py
 #
 # Prerequisites:
 #     - Kafka broker running at localhost:9092
@@ -91,7 +91,7 @@ async def main():
     # ── Data recorder (optional) ────────────────────────────────
     recorder = None
     if args.snapshot_interval > 0:
-        from data_recorder import DataRecorder
+        from arena.recorder import DataRecorder
 
         recorder = DataRecorder(data_dir=args.data_dir)
         store.attach_recorder(recorder)

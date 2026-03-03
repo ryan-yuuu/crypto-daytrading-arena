@@ -1,21 +1,10 @@
-"""
-Coinbase-to-Kafka connector that streams real-time market data from
-the Coinbase Exchange WebSocket and invokes an AgentRouterNode
-for each price update (fire-and-forget).
-
-Uses the ticker_batch channel for ~5-second batched price updates.
+"""Coinbase exchange connector — WebSocket consumer, REST poller,
+and Kafka connector in a single module.
 
 Usage:
-    uv run python coinbase_kafka_connector.py
-    KAFKA_BOOTSTRAP_SERVERS=broker:9092 \
-        uv run python coinbase_kafka_connector.py
-    uv run python coinbase_kafka_connector.py \
-        --products BTC-USD ETH-USD SOL-USD
-    uv run python coinbase_kafka_connector.py \
-        --min-interval 30
-
-Prerequisites:
-    - Kafka broker running (set KAFKA_BOOTSTRAP_SERVERS env var, default: localhost:9092)
+    uv run python exchanges/coinbase.py
+    uv run python exchanges/coinbase.py --products BTC-USD ETH-USD SOL-USD
+    uv run python exchanges/coinbase.py --min-interval 30
 """
 
 import argparse
@@ -26,18 +15,23 @@ import os
 import signal
 import sys
 import time
+from datetime import datetime, timezone
 
+import httpx
 import websockets
-from pydantic import BaseModel
 
 from calfkit.broker.broker import BrokerClient
 from calfkit.nodes.agent_router_node import AgentRouterNode
 from calfkit.runners.service_client import RouterServiceClient
-from coinbase_consumer import CandleBook, poll_rest
+
+from arena.models import Candle, TIMEFRAMES
+from arena.price_book import CandleBook
+from exchanges import PRICE_TOPIC, TickerMessage
 
 logger = logging.getLogger(__name__)
 
 COINBASE_WS_URL = "wss://ws-feed.exchange.coinbase.com"
+COINBASE_REST_BASE = "https://api.exchange.coinbase.com"
 
 DEFAULT_PRODUCTS = [
     "BTC-USD",
@@ -47,28 +41,51 @@ DEFAULT_PRODUCTS = [
 
 RECONNECT_DELAY_SECONDS = 3
 
-PRICE_TOPIC = "market_data.prices"
+
+def parse_coinbase_candle(row: list) -> Candle:
+    """Parse a Coinbase candle row: [ts, low, high, open, close, vol]."""
+    return Candle(
+        time=datetime.fromtimestamp(row[0], tz=timezone.utc),
+        open=float(row[3]),
+        high=float(row[2]),
+        low=float(row[1]),
+        close=float(row[4]),
+        volume=float(row[5]),
+    )
 
 
-class TickerMessage(BaseModel):
-    """Coinbase ticker message published to Kafka."""
+async def poll_rest(
+    products: list[str],
+    candle_book: CandleBook,
+    interval: float = 60.0,
+) -> None:
+    """Poll Coinbase REST API for multi-timeframe candles and current prices."""
+    async with httpx.AsyncClient(base_url=COINBASE_REST_BASE, timeout=15.0) as client:
+        while True:
+            now = int(datetime.now(timezone.utc).timestamp())
 
-    product_id: str
-    price: str
-    best_bid: str
-    best_bid_size: str
-    best_ask: str
-    best_ask_size: str
-    side: str
-    last_size: str
-    open_24h: str
-    high_24h: str
-    low_24h: str
-    volume_24h: str
-    volume_30d: str
-    trade_id: int
-    sequence: int
-    time: str
+            for product_id in products:
+                try:
+                    for tf in TIMEFRAMES:
+                        start = now - tf.start_minutes_ago * 60
+                        end = now - tf.end_minutes_ago * 60
+                        resp = await client.get(
+                            f"/products/{product_id}/candles",
+                            params={
+                                "granularity": tf.granularity,
+                                "start": start,
+                                "end": end,
+                            },
+                        )
+                        resp.raise_for_status()
+                        candle_book.update_from_api(product_id, tf.granularity, resp.json())
+
+                    resp = await client.get(f"/products/{product_id}/ticker")
+                    resp.raise_for_status()
+                except Exception:
+                    logger.exception("REST poll failed for %s", product_id)
+
+            await asyncio.sleep(interval)
 
 
 class CoinbaseKafkaConnector:
@@ -95,7 +112,7 @@ class CoinbaseKafkaConnector:
         if not products:
             raise ValueError("At least one product must be specified")
         self._broker = broker
-        self._client = RouterServiceClient(broker, router_node)
+        self._client = RouterServiceClient(broker, router_node, deps_type=dict)
         self._products = products
         self._min_interval = min_publish_interval
         self._running = True
@@ -187,7 +204,7 @@ class CoinbaseKafkaConnector:
             summary,
         )
 
-    async def _periodic_publish(self) -> None:
+    async def _periodic_agent_invoke(self) -> None:
         """Publish the latest snapshot on a fixed interval."""
         interval = max(self._min_interval, 1.0)
         while self._running:
@@ -214,18 +231,15 @@ class CoinbaseKafkaConnector:
                 ", ".join(self._products),
             )
 
-            flush_task = asyncio.create_task(self._periodic_publish())
+            agent_invoke_task = asyncio.create_task(self._periodic_agent_invoke())
 
-            candle_task: asyncio.Task | None = None
+            candle_update_task: asyncio.Task | None = None
             if self._candle_book is not None:
-                from coinbase_consumer import PriceBook
-
                 # CandleBook updates are independent; PriceBook updates come
-                # from the WebSocket, so pass a throwaway PriceBook here.
-                candle_task = asyncio.create_task(
+                # from the WebSocket
+                candle_update_task = asyncio.create_task(
                     poll_rest(
                         products=self._products,
-                        price_book=PriceBook(),
                         candle_book=self._candle_book,
                         interval=60.0,
                     )
@@ -244,15 +258,15 @@ class CoinbaseKafkaConnector:
                     self._latest[ticker.product_id] = ticker
                     await self._broker.publish(ticker, PRICE_TOPIC)
             finally:
-                flush_task.cancel()
+                agent_invoke_task.cancel()
                 try:
-                    await flush_task
+                    await agent_invoke_task
                 except asyncio.CancelledError:
                     pass
-                if candle_task is not None:
-                    candle_task.cancel()
+                if candle_update_task is not None:
+                    candle_update_task.cancel()
                     try:
-                        await candle_task
+                        await candle_update_task
                     except asyncio.CancelledError:
                         pass
 

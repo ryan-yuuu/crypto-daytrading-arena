@@ -62,47 +62,7 @@ For the full config schema with all fields, types, and defaults, see [`config.sc
 
 ---
 
-## start_arena.py
-
-Automated startup that launches all components in the correct order.
-
-| Flag | Required | Default | Description |
-|------|----------|---------|-------------|
-| `--broker-url` | No | `localhost:9092` | Kafka broker address |
-| `--cloud-broker` | No | — | Use cloud broker URL (skips local Docker broker) |
-| `--config` | No | `config.json` | Path to configuration file |
-| `--api-key` | No | `$OPENAI_API_KEY` | API key for LLM provider (legacy mode) |
-| `--model-id` | No | `gpt-4o-mini` | Model ID for ChatNode (legacy mode) |
-| `--reasoning-effort` | No | — | Reasoning level: `low`, `medium`, `high` |
-| `--exchange` | No | `coinbase` | Exchange connector: `coinbase` or `binance` (overrides config) |
-| `--interval` | No | `60` | Market data update interval in seconds |
-| `--with-viewer` | No | — | Also start the response viewer |
-| `--skip-checks` | No | — | Skip prerequisite checks |
-| `--skip-deps` | No | — | Skip dependency installation |
-| `--continue-on-error` | No | — | Continue even if components fail |
-
-**Examples:**
-```bash
-# Basic startup with config file
-uv run python start_arena.py
-
-# Use custom config file
-uv run python start_arena.py --config my-config.json
-
-# Use Binance instead of Coinbase
-uv run python start_arena.py --exchange binance
-
-# Use cloud broker with custom model
-uv run python start_arena.py --cloud-broker broker.example.com:9092
-
-# Fast updates with all features
-uv run python start_arena.py --interval 30 --with-viewer
-
-```
-
----
-
-## deploy_chat_node.py
+## deploy/chat_node.py
 
 Deploy a ChatNode for LLM inference. Can use explicit CLI args or load from config.
 
@@ -123,25 +83,25 @@ Deploy a ChatNode for LLM inference. Can use explicit CLI args or load from conf
 **Examples:**
 ```bash
 # Explicit configuration
-uv run python deploy_chat_node.py \
+uv run python deploy/chat_node.py \
     --name gpt4o --model-id gpt-4o \
     --bootstrap-servers localhost:9092 \
     --api-key $OPENAI_API_KEY
 
 # Load from config file
-uv run python deploy_chat_node.py \
+uv run python deploy/chat_node.py \
     --from-config gpt4o \
     --bootstrap-servers localhost:9092
 
 # Using OpenRouter (for Claude and other non-OpenAI models)
-uv run python deploy_chat_node.py \
+uv run python deploy/chat_node.py \
     --name claude --model-id anthropic/claude-sonnet-4 \
     --base-url https://openrouter.ai/api/v1 \
     --api-key $OPENROUTER_API_KEY \
     --bootstrap-servers localhost:9092
 ```
 
-## deploy_router_node.py
+## deploy/router_node.py
 
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
@@ -152,7 +112,7 @@ uv run python deploy_chat_node.py \
 
 ---
 
-## binance_kafka_connector.py
+## exchanges/binance.py
 
 Stream real-time market data from Binance to Kafka.
 
@@ -167,17 +127,17 @@ Stream real-time market data from Binance to Kafka.
 **Examples:**
 ```bash
 # Use symbols from config file
-uv run python binance_kafka_connector.py --bootstrap-servers localhost:9092
+uv run python exchanges/binance.py --bootstrap-servers localhost:9092
 
 # Override with specific symbols
-uv run python binance_kafka_connector.py \
+uv run python exchanges/binance.py \
     --bootstrap-servers localhost:9092 \
     --symbols BTCUSDT ETHUSDT SOLUSDT
 ```
 
 ---
 
-## coinbase_kafka_connector.py
+## exchanges/coinbase.py
 
 Stream real-time market data from Coinbase to Kafka.
 
@@ -192,10 +152,10 @@ Stream real-time market data from Coinbase to Kafka.
 **Examples:**
 ```bash
 # Use products from config file
-uv run python coinbase_kafka_connector.py --bootstrap-servers localhost:9092
+uv run python exchanges/coinbase.py --bootstrap-servers localhost:9092
 
 # Override with specific products
-uv run python coinbase_kafka_connector.py \
+uv run python exchanges/coinbase.py \
     --bootstrap-servers localhost:9092 \
     --products BTC-USD ETH-USD SOL-USD
 ```

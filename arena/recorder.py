@@ -1,5 +1,4 @@
-"""
-CSV Data Recorder — writes periodic portfolio snapshots and every
+"""CSV Data Recorder — writes periodic portfolio snapshots and every
 trade execution to session-timestamped CSV files for post-session
 analysis, backtesting research, and agent performance comparison.
 """
@@ -14,7 +13,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from trading_tools import AccountStore
+from arena.account_store import AccountStore
 
 logger = logging.getLogger(__name__)
 

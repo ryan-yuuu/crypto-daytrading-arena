@@ -1,22 +1,13 @@
-"""
-Binance-to-Kafka connector that streams real-time market data from
-the Binance Exchange WebSocket and invokes an AgentRouterNode
-for each price update (fire-and-forget).
-
-Uses the 24hr ticker stream for ~1-second price updates.
+"""Binance exchange connector — WebSocket consumer, REST poller,
+and Kafka connector in a single module.
 
 Usage:
-    uv run python binance_kafka_connector.py
-    KAFKA_BOOTSTRAP_SERVERS=broker:9092 \
-        uv run python binance_kafka_connector.py
-    uv run python binance_kafka_connector.py \
-        --symbols BTCUSDT ETHUSDT SOLUSDT
-    uv run python binance_kafka_connector.py \
-        --min-interval 30
-
-Prerequisites:
-    - Kafka broker running (set KAFKA_BOOTSTRAP_SERVERS env var, default: localhost:9092)
+    uv run python exchanges/binance.py
+    uv run python exchanges/binance.py --symbols BTCUSDT ETHUSDT SOLUSDT
+    uv run python exchanges/binance.py --min-interval 30
 """
+
+from __future__ import annotations
 
 import argparse
 import asyncio
@@ -27,20 +18,36 @@ import signal
 import sys
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any
 
+import httpx
 import websockets
-from pydantic import BaseModel
 
 from calfkit.broker.broker import BrokerClient
 from calfkit.nodes.agent_router_node import AgentRouterNode
 from calfkit.runners.service_client import RouterServiceClient
-from binance_consumer import CandleBook, poll_rest
+
+from arena.models import Candle, TIMEFRAMES
+from arena.price_book import CandleBook, PriceBook
+from exchanges import PRICE_TOPIC, TickerMessage
 
 logger = logging.getLogger(__name__)
 
 BINANCE_WS_URL = "wss://stream.binance.com:9443"
 BINANCE_WS_URL_FALLBACK = "wss://stream.binance.com:443"
+BINANCE_REST_URLS = [
+    "https://api.binance.com",
+    "https://api1.binance.com",
+    "https://api2.binance.com",
+    "https://api3.binance.com",
+]
+
+# Binance interval mapping (seconds -> Binance format)
+BINANCE_INTERVAL_MAP = {
+    60: "1m",
+    300: "5m",
+    900: "15m",
+}
 
 DEFAULT_SYMBOLS = [
     "BTCUSDT",
@@ -52,28 +59,138 @@ RECONNECT_DELAY_SECONDS = 3
 PING_INTERVAL_SECONDS = 30  # Must send ping within 60 seconds per Binance docs
 MAX_CONNECTION_LIFETIME_SECONDS = 82800  # 23 hours (Binance limit is 24h)
 
-PRICE_TOPIC = "market_data.prices"
+
+def parse_binance_candle(row: list) -> Candle:
+    """Parse a Binance candle row: [ts_ms, open, high, low, close, vol, ...]."""
+    return Candle(
+        time=datetime.fromtimestamp(row[0] / 1000, tz=timezone.utc),
+        open=float(row[1]),
+        high=float(row[2]),
+        low=float(row[3]),
+        close=float(row[4]),
+        volume=float(row[5]),
+    )
 
 
-class TickerMessage(BaseModel):
-    """Binance ticker message published to Kafka."""
+class BinanceRESTClient:
+    """Binance REST API client with automatic failover."""
 
-    product_id: str
-    price: str
-    best_bid: str
-    best_bid_size: str
-    best_ask: str
-    best_ask_size: str
-    side: str
-    last_size: str
-    open_24h: str
-    high_24h: str
-    low_24h: str
-    volume_24h: str
-    volume_30d: str
-    trade_id: int
-    sequence: int
-    time: str
+    def __init__(self) -> None:
+        self._url_index = 0
+        self._client = httpx.AsyncClient(timeout=15.0)
+
+    @property
+    def _base_url(self) -> str:
+        return BINANCE_REST_URLS[self._url_index]
+
+    def _rotate_url(self) -> str:
+        """Rotate to next fallback URL."""
+        self._url_index = (self._url_index + 1) % len(BINANCE_REST_URLS)
+        logger.info("Switching to fallback URL: %s", self._base_url)
+        return self._base_url
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self._client:
+            await self._client.aclose()
+
+    async def _request(self, method: str, path: str, **kwargs) -> Any:
+        """Make request with automatic retry on different base URLs."""
+        last_error = None
+
+        for _ in range(len(BINANCE_REST_URLS)):
+            url = f"{self._base_url}{path}"
+            try:
+                response = await self._client.request(method, url, **kwargs)
+                response.raise_for_status()
+                return response.json()
+            except (httpx.NetworkError, httpx.TimeoutException) as e:
+                last_error = e
+                logger.warning("Request failed to %s: %s", url, e)
+                self._rotate_url()
+            except httpx.HTTPStatusError as e:
+                # Don't retry on 4xx errors
+                if e.response.status_code < 500:
+                    raise
+                last_error = e
+                logger.warning("Server error from %s: %s", url, e)
+                self._rotate_url()
+
+        raise last_error or Exception("All Binance API endpoints failed")
+
+    async def get_klines(
+        self,
+        symbol: str,
+        interval: str,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        limit: int = 1000,
+    ) -> list[list]:
+        """Fetch klines (candlestick) data."""
+        params = {
+            "symbol": symbol.upper(),
+            "interval": interval,
+            "limit": limit,
+        }
+        if start_time:
+            params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
+
+        return await self._request("GET", "/api/v3/klines", params=params)
+
+    async def get_24h_ticker(self, symbol: str) -> dict:
+        """Fetch 24h rolling window ticker statistics."""
+        params = {"symbol": symbol.upper()}
+        return await self._request("GET", "/api/v3/ticker/24hr", params=params)
+
+async def poll_rest(
+    symbols: list[str],
+    price_book: PriceBook,
+    candle_book: CandleBook,
+    interval: float = 60.0,
+) -> None:
+    """Poll Binance REST API for multi-timeframe candles and current prices."""
+    async with BinanceRESTClient() as client:
+        while True:
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+            for symbol in symbols:
+                try:
+                    for tf in TIMEFRAMES:
+                        start_ms = now_ms - tf.start_minutes_ago * 60 * 1000
+                        end_ms = now_ms - tf.end_minutes_ago * 60 * 1000
+                        interval_str = BINANCE_INTERVAL_MAP.get(tf.granularity, "1m")
+
+                        resp = await client.get_klines(
+                            symbol=symbol,
+                            interval=interval_str,
+                            start_time=start_ms,
+                            end_time=end_ms,
+                        )
+                        candle_book.update_from_api(symbol, tf.granularity, resp)
+
+                    resp = await client.get_24h_ticker(symbol)
+                    price_book.update({
+                        "product_id": symbol,
+                        "price": resp["lastPrice"],
+                        "best_bid": resp["bidPrice"],
+                        "best_bid_size": resp["bidQty"],
+                        "best_ask": resp["askPrice"],
+                        "best_ask_size": resp["askQty"],
+                        "side": "",
+                        "last_size": resp["lastQty"],
+                        "volume_24h": resp["volume"],
+                        "time": datetime.fromtimestamp(
+                            resp["closeTime"] / 1000, tz=timezone.utc
+                        ).isoformat(),
+                    })
+                except Exception:
+                    logger.exception("REST poll failed for %s", symbol)
+
+            await asyncio.sleep(interval)
 
 
 class BinanceKafkaConnector:
@@ -95,12 +212,12 @@ class BinanceKafkaConnector:
         router_node: AgentRouterNode,
         symbols: list[str],
         min_publish_interval: float = 0.0,
-        candle_book: Optional[CandleBook] = None,
+        candle_book: CandleBook | None = None,
     ) -> None:
         if not symbols:
             raise ValueError("At least one symbol must be specified")
         self._broker = broker
-        self._client = RouterServiceClient(broker, router_node)
+        self._client = RouterServiceClient(broker, router_node, deps_type=dict)
         self._symbols = symbols
         self._min_interval = min_publish_interval
         self._running = True
@@ -142,25 +259,25 @@ class BinanceKafkaConnector:
         """Signal the connector to shut down gracefully."""
         self._running = False
 
-    def _parse_binance_ticker(self, data: dict) -> Optional[TickerMessage]:
+    def _parse_binance_ticker(self, data: dict) -> TickerMessage | None:
         """Parse Binance 24hr ticker data into TickerMessage."""
         try:
             return TickerMessage(
-                product_id=data["s"],  # Symbol
-                price=data["c"],  # Last price (close)
-                best_bid=data["b"],  # Best bid
-                best_bid_size=data["B"],  # Best bid qty
-                best_ask=data["a"],  # Best ask
-                best_ask_size=data["A"],  # Best ask qty
-                side="",  # Not provided by Binance ticker
-                last_size=data.get("Q", "0"),  # Last quantity
-                open_24h=data["o"],  # Open price
-                high_24h=data["h"],  # High price
-                low_24h=data["l"],  # Low price
-                volume_24h=data["v"],  # Base volume
-                volume_30d="0",  # Not provided by Binance
-                trade_id=data.get("n", 0),  # Number of trades
-                sequence=0,  # Not provided by Binance
+                product_id=data["s"],
+                price=data["c"],
+                best_bid=data["b"],
+                best_bid_size=data["B"],
+                best_ask=data["a"],
+                best_ask_size=data["A"],
+                side="",
+                last_size=data.get("Q", "0"),
+                open_24h=data["o"],
+                high_24h=data["h"],
+                low_24h=data["l"],
+                volume_24h=data["v"],
+                volume_30d="0",
+                trade_id=data.get("n", 0),
+                sequence=0,
                 time=datetime.fromtimestamp(
                     data["E"] / 1000, tz=timezone.utc
                 ).isoformat(),
@@ -226,12 +343,12 @@ class BinanceKafkaConnector:
             await asyncio.sleep(interval)
             await self._publish_latest()
 
-    async def _ping_loop(self, ws: websockets.WebSocketClientProtocol) -> None:
+    async def _ping_loop(self, ws: websockets.ClientConnection) -> None:
         """Send ping frames periodically to keep connection alive."""
         while self._running:
             try:
                 await asyncio.sleep(PING_INTERVAL_SECONDS)
-                if ws.open:
+                if ws.state.name == "OPEN":
                     await ws.ping()
                     logger.debug("Ping sent")
             except asyncio.CancelledError:
@@ -239,18 +356,14 @@ class BinanceKafkaConnector:
             except Exception as e:
                 logger.warning("Ping failed: %s", e)
 
-    async def _lifetime_manager(self, ws: websockets.WebSocketClientProtocol) -> None:
+    async def _lifetime_manager(self, ws: websockets.ClientConnection) -> None:
         """Force reconnection before 24-hour limit."""
         await asyncio.sleep(MAX_CONNECTION_LIFETIME_SECONDS)
         logger.info("Connection approaching 24h limit, forcing reconnection")
         await ws.close()
 
-    async def _connect_with_fallback(self, streams: str) -> websockets.WebSocketClientProtocol:
-        """Connect to Binance WebSocket with fallback endpoints.
-
-        Tries primary endpoint first, then falls back to alternative ports/URLs
-        if connection is refused or times out.
-        """
+    async def _connect_with_fallback(self, streams: str) -> websockets.ClientConnection:
+        """Connect to Binance WebSocket with fallback endpoints."""
         urls_to_try = [
             f"{BINANCE_WS_URL}/stream?streams={streams}",
             f"{BINANCE_WS_URL_FALLBACK}/stream?streams={streams}",
@@ -274,8 +387,6 @@ class BinanceKafkaConnector:
         """Connect to Binance WebSocket and buffer tickers for periodic publish."""
         self._latest.clear()
 
-        # Build combined stream URL: /stream?streams=btcusdt@ticker/ethusdt@ticker/...
-        # Note: Binance combined streams use /stream?streams= format, not /ws/
         streams = "/".join(f"{s.lower()}@ticker" for s in self._symbols)
 
         ws = await self._connect_with_fallback(streams)
@@ -290,10 +401,8 @@ class BinanceKafkaConnector:
             ping_task = asyncio.create_task(self._ping_loop(ws))
             lifetime_task = asyncio.create_task(self._lifetime_manager(ws))
 
-            candle_task: Optional[asyncio.Task] = None
+            candle_task: asyncio.Task | None = None
             if self._candle_book is not None:
-                from binance_consumer import PriceBook
-
                 candle_task = asyncio.create_task(
                     poll_rest(
                         symbols=self._symbols,
@@ -359,7 +468,7 @@ class BinanceKafkaConnector:
                         pass
 
 
-def parse_args(argv: Optional[list[str]] | None = None) -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Stream Binance market data to a Kafka topic.",
     )
@@ -411,7 +520,7 @@ async def run(args: argparse.Namespace, router_node: AgentRouterNode) -> None:
             logger.debug("Config not loaded, using default symbols: %s", e)
             symbols = list(DEFAULT_SYMBOLS)
 
-    candle_book = CandleBook()
+    candle_book = CandleBook(parse_row=parse_binance_candle)
     broker = BrokerClient(bootstrap_servers=args.bootstrap_servers)
     connector = BinanceKafkaConnector(
         broker=broker,
