@@ -206,9 +206,9 @@ For full column descriptions and examples, see [docs/csv-data-recording.md](docs
 
 <br>
 
-## CLI Reference
+## CLI Reference & Config-Based Deployments
 
-For full CLI flags and options, see [CLI_REFERENCE.md](docs/CLI_REFERENCE.md).
+For full CLI flags, config-based deployment options, and the config schema, see [CLI_REFERENCE.md](docs/CLI_REFERENCE.md).
 
 <br>
 
