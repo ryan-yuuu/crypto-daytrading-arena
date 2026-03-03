@@ -73,7 +73,6 @@ After installation, restart your terminal.
 
 ```bash
 uv add calfkit@latest
-# Or, python -m venv .venv && source .venv/bin/activate && pip install --upgrade calfkit
 ```
 
 [Calfkit](https://github.com/calf-ai/calfkit-sdk) is the event-stream SDK that powers this project. It handles the agent realtime stream consumption and orechestration.
@@ -112,7 +111,6 @@ Install dependencies:
 
 ```bash
 uv sync
-# Or, pip install -r requirements.txt
 ```
 
 Then launch each component in its own terminal. All components will access the same broker.
@@ -127,8 +125,8 @@ Start either the Coinbase or Binance connector to stream live market data:
 # Coinbase (default)
 uv run python exchanges/coinbase.py --bootstrap-servers <broker-url>
 
-# Binance
-uv run python exchanges/binance.py --bootstrap-servers <broker-url>
+# Or, Binance (experimental)
+# uv run python exchanges/binance.py --bootstrap-servers <broker-url>
 ```
 
 Optional: You can use the `--min-interval <seconds>` flag which controls how often agents are fed market data (default: 60s). Note that candle data is only updated every 60 seconds due to Coinbase API restrictions, so intervals below a minute mean agents will receive updated live pricing (bid/ask spread, ~5s granularity) but the same candle data.
@@ -139,7 +137,6 @@ Optional: You can use the `--min-interval <seconds>` flag which controls how oft
 
 ```bash
 uv run python deploy/tools_and_dashboard.py --bootstrap-servers <broker-url>
-# Or, source .venv/bin/activate && python deploy/tools_and_dashboard.py --bootstrap-servers <broker-url>
 ```
 
 <br>
@@ -155,30 +152,22 @@ uv run python deploy/chat_node.py \
     --name <unique-name-of-chatnode> --model-id <openai-model-id> --bootstrap-servers <broker-url> \
     --reasoning-effort <optional-reasoning-level> --api-key <api-key>
 
-# Or, OpenAI-compatible provider (e.g. DeepInfra, Gemini, etc.)
-uv run python deploy/chat_node.py \
-    --name <unique-name-of-chatnode> --model-id <model-id> --bootstrap-servers <broker-url> \
-    --base-url <llm-provider-base-url> --reasoning-effort <optional-reasoning-level> --api-key <api-key>
-
-# Or, source .venv/bin/activate && python deploy/chat_node.py \
+# Or, any OpenAI-compatible provider (e.g. DeepInfra, Gemini, etc.)
+# uv run python deploy/chat_node.py \
 #     --name <unique-name-of-chatnode> --model-id <model-id> --bootstrap-servers <broker-url> \
-#     --api-key <api-key>
+#     --base-url <llm-provider-base-url> --reasoning-effort <optional-reasoning-level> --api-key <api-key>
 ```
 
 <br>
 
-### 4. Deploy agent routers
+### 4. Deploy agents
 
-Deploy one router per agent. Each targets a ChatNode you define by name and uses a trading strategy you can edit in `arena/strategies.py`. See `arena/strategies.py` for the full system prompts.
+Deploy an agent that targets a ChatNode you define by name and uses a trading strategy you can edit in `arena/strategies.py`. See `arena/strategies.py` for the full system prompts.
 
 ```bash
 uv run python deploy/router_node.py \
     --name <unique-agent-name> --chat-node-name <name-of-chatnode> \
     --strategy <strategy> --bootstrap-servers <broker-url>
-
-# Or, source .venv/bin/activate && python deploy/router_node.py \
-#     --name <unique-agent-name> --chat-node-name <name-of-chatnode> \
-#     --strategy <strategy> --bootstrap-servers <broker-url>
 ```
 
 Once agent routers are deployed, market data flows to the agents and trades should hydrate the dashboard soon.
@@ -191,7 +180,6 @@ A live dashboard that shows all agent activity, such as tool calls, text respons
 
 ```bash
 uv run python deploy/response_viewer.py --bootstrap-servers <broker-url>
-# Or, source .venv/bin/activate && python deploy/response_viewer.py --bootstrap-servers <broker-url>
 ```
 
 <br>
