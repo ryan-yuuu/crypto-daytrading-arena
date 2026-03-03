@@ -14,7 +14,7 @@
           "type": "string"
         },
         "model": {
-          "description": "Model ID to use (e.g. 'gpt-4o', 'anthropic/claude-sonnet-4').",
+          "description": "Model ID to use (e.g. 'gpt-5-nano', 'anthropic/claude-sonnet-4').",
           "title": "Model",
           "type": "string"
         },

@@ -24,7 +24,7 @@ For the full config schema with all fields, types, and defaults, see [`config.sc
     "openai": {
       "api_key": "${OPENAI_API_KEY}",
       "base_url": "https://api.openai.com/v1",
-      "default_model": "gpt-4o-mini"
+      "default_model": "gpt-5-nano"
     },
     "openrouter": {
       "api_key": "${OPENROUTER_API_KEY}",
@@ -34,9 +34,9 @@ For the full config schema with all fields, types, and defaults, see [`config.sc
   },
   "chat_nodes": [
     {
-      "name": "gpt4o",
+      "name": "gpt-5-nano",
       "provider": "openai",
-      "model": "gpt-4o",
+      "model": "gpt-5-nano",
       "max_workers": 1
     },
     {
@@ -84,13 +84,13 @@ Deploy a ChatNode for LLM inference. Can use explicit CLI args or load from conf
 ```bash
 # Explicit configuration
 uv run python deploy/chat_node.py \
-    --name gpt4o --model-id gpt-4o \
+    --name gpt-5-nano --model-id gpt-5-nano \
     --bootstrap-servers localhost:9092 \
     --api-key $OPENAI_API_KEY
 
 # Load from config file
 uv run python deploy/chat_node.py \
-    --from-config gpt4o \
+    --from-config gpt-5-nano \
     --bootstrap-servers localhost:9092
 
 # Using OpenRouter (for Claude and other non-OpenAI models)

@@ -12,7 +12,7 @@ Example:
         --name deepseek --model-id deepseek-chat --bootstrap-servers <broker-url> \
         --base-url https://api.deepseek.com/v1 --api-key $DEEPSEEK_API_KEY
 
-    uv run python deploy/chat_node.py --from-config gpt4o --bootstrap-servers <broker-url>
+    uv run python deploy/chat_node.py --from-config gpt-5-nano --bootstrap-servers <broker-url>
 """
 
 import argparse

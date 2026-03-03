@@ -29,7 +29,7 @@ DEFAULT_COINBASE_PRODUCTS = ["BTC-USD", "FARTCOIN-USD", "SOL-USD"]
 PROVIDER_DEFAULTS = {
     "openai": {
         "base_url": "https://api.openai.com/v1",
-        "default_model": "gpt-4o-mini",
+        "default_model": "gpt-5-nano",
     },
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1",
@@ -51,7 +51,7 @@ class ChatNodeConfig(BaseModel):
 
     name: str = Field(description="Unique name for this ChatNode (becomes the Kafka topic suffix).")
     provider: str = Field(description="Key into llm_providers (e.g. 'openai', 'openrouter').")
-    model: str = Field(description="Model ID to use (e.g. 'gpt-4o', 'anthropic/claude-sonnet-4').")
+    model: str = Field(description="Model ID to use (e.g. 'gpt-5-nano', 'anthropic/claude-sonnet-4').")
     max_workers: int = Field(1, description="Concurrent inference workers.", ge=1)
     reasoning_effort: Literal["low", "medium", "high"] | None = Field(
         None, description="Reasoning effort level for supported models."
