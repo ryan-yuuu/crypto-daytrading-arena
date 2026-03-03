@@ -34,21 +34,16 @@ from calfkit.broker.broker import BrokerClient
 from calfkit.nodes.agent_router_node import AgentRouterNode
 from calfkit.runners.service_client import RouterServiceClient
 from coinbase_consumer import CandleBook, poll_rest
-from config import get_default_symbols
 
 logger = logging.getLogger(__name__)
 
 COINBASE_WS_URL = "wss://ws-feed.exchange.coinbase.com"
 
-# Load defaults from config if available
-try:
-    DEFAULT_PRODUCTS = get_default_symbols("coinbase")
-except Exception:
-    DEFAULT_PRODUCTS = [
-        "BTC-USD",
-        "FARTCOIN-USD",
-        "SOL-USD",
-    ]
+DEFAULT_PRODUCTS = [
+    "BTC-USD",
+    "FARTCOIN-USD",
+    "SOL-USD",
+]
 
 RECONNECT_DELAY_SECONDS = 3
 
@@ -306,11 +301,13 @@ async def run(args: argparse.Namespace, router_node: AgentRouterNode) -> None:
     products = args.products
     if products is None:
         from config import load_config
+
         try:
             config = load_config(args.config)
             products = config.trading.coinbase_products
-        except Exception:
-            products = DEFAULT_PRODUCTS
+        except Exception as e:
+            logger.debug("Config not loaded, using default products: %s", e)
+            products = list(DEFAULT_PRODUCTS)
 
     broker = BrokerClient(bootstrap_servers=args.bootstrap_servers)
     connector = CoinbaseKafkaConnector(

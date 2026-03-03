@@ -1,0 +1,140 @@
+{
+  "$defs": {
+    "ChatNodeConfig": {
+      "description": "A ChatNode deployment that provides LLM inference to agents.",
+      "properties": {
+        "name": {
+          "description": "Unique name for this ChatNode (becomes the Kafka topic suffix).",
+          "title": "Name",
+          "type": "string"
+        },
+        "provider": {
+          "description": "Key into llm_providers (e.g. 'openai', 'openrouter').",
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "description": "Model ID to use (e.g. 'gpt-4o', 'anthropic/claude-sonnet-4').",
+          "title": "Model",
+          "type": "string"
+        },
+        "max_workers": {
+          "default": 1,
+          "description": "Concurrent inference workers.",
+          "minimum": 1,
+          "title": "Max Workers",
+          "type": "integer"
+        },
+        "reasoning_effort": {
+          "anyOf": [
+            {
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Reasoning effort level for supported models.",
+          "title": "Reasoning Effort"
+        }
+      },
+      "required": [
+        "name",
+        "provider",
+        "model"
+      ],
+      "title": "ChatNodeConfig",
+      "type": "object"
+    },
+    "LLMProviderConfig": {
+      "description": "Configuration for an LLM provider (must be OpenAI-compatible).",
+      "properties": {
+        "api_key": {
+          "default": "",
+          "description": "API key or ${ENV_VAR} reference.",
+          "title": "Api Key",
+          "type": "string"
+        },
+        "base_url": {
+          "default": "",
+          "description": "Base URL for the provider's API.",
+          "title": "Base Url",
+          "type": "string"
+        },
+        "default_model": {
+          "default": "",
+          "description": "Default model ID when not overridden by a ChatNode.",
+          "title": "Default Model",
+          "type": "string"
+        }
+      },
+      "title": "LLMProviderConfig",
+      "type": "object"
+    },
+    "TradingConfig": {
+      "description": "Trading-related configuration.",
+      "properties": {
+        "exchange": {
+          "default": "coinbase",
+          "description": "Which exchange connector to use for market data.",
+          "enum": [
+            "coinbase",
+            "binance"
+          ],
+          "title": "Exchange",
+          "type": "string"
+        },
+        "binance_symbols": {
+          "description": "Binance trading pair symbols to subscribe to.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Binance Symbols",
+          "type": "array"
+        },
+        "coinbase_products": {
+          "description": "Coinbase product IDs to subscribe to.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Coinbase Products",
+          "type": "array"
+        }
+      },
+      "title": "TradingConfig",
+      "type": "object"
+    }
+  },
+  "description": "Root configuration for the Trading Arena.",
+  "properties": {
+    "llm_providers": {
+      "additionalProperties": {
+        "$ref": "#/$defs/LLMProviderConfig"
+      },
+      "description": "Named LLM provider configurations. Keys are referenced by chat_nodes[].provider.",
+      "title": "Llm Providers",
+      "type": "object"
+    },
+    "chat_nodes": {
+      "description": "ChatNode deployments. Each node targets a provider and model.",
+      "items": {
+        "$ref": "#/$defs/ChatNodeConfig"
+      },
+      "title": "Chat Nodes",
+      "type": "array"
+    },
+    "trading": {
+      "$ref": "#/$defs/TradingConfig",
+      "description": "Exchange connector and trading pair configuration."
+    }
+  },
+  "title": "ArenaConfig",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

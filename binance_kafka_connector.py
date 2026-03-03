@@ -26,6 +26,7 @@ import os
 import signal
 import sys
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import websockets
@@ -35,22 +36,17 @@ from calfkit.broker.broker import BrokerClient
 from calfkit.nodes.agent_router_node import AgentRouterNode
 from calfkit.runners.service_client import RouterServiceClient
 from binance_consumer import CandleBook, poll_rest
-from config import get_default_symbols
 
 logger = logging.getLogger(__name__)
 
 BINANCE_WS_URL = "wss://stream.binance.com:9443"
 BINANCE_WS_URL_FALLBACK = "wss://stream.binance.com:443"
 
-# Load defaults from config if available
-try:
-    DEFAULT_SYMBOLS = get_default_symbols("binance")
-except Exception:
-    DEFAULT_SYMBOLS = [
-        "BTCUSDT",
-        "FARTCOINUSDT",
-        "SOLUSDT",
-    ]
+DEFAULT_SYMBOLS = [
+    "BTCUSDT",
+    "FARTCOINUSDT",
+    "SOLUSDT",
+]
 
 RECONNECT_DELAY_SECONDS = 3
 PING_INTERVAL_SECONDS = 30  # Must send ping within 60 seconds per Binance docs
@@ -165,8 +161,8 @@ class BinanceKafkaConnector:
                 volume_30d="0",  # Not provided by Binance
                 trade_id=data.get("n", 0),  # Number of trades
                 sequence=0,  # Not provided by Binance
-                time=__import__("datetime").datetime.fromtimestamp(
-                    data["E"] / 1000, tz=__import__("datetime").timezone.utc
+                time=datetime.fromtimestamp(
+                    data["E"] / 1000, tz=timezone.utc
                 ).isoformat(),
             )
         except Exception as e:
@@ -407,18 +403,22 @@ async def run(args: argparse.Namespace, router_node: AgentRouterNode) -> None:
     symbols = args.symbols
     if symbols is None:
         from config import load_config
+
         try:
             config = load_config(args.config)
             symbols = config.trading.binance_symbols
-        except Exception:
-            symbols = DEFAULT_SYMBOLS
+        except Exception as e:
+            logger.debug("Config not loaded, using default symbols: %s", e)
+            symbols = list(DEFAULT_SYMBOLS)
 
+    candle_book = CandleBook()
     broker = BrokerClient(bootstrap_servers=args.bootstrap_servers)
     connector = BinanceKafkaConnector(
         broker=broker,
         router_node=router_node,
         symbols=symbols,
         min_publish_interval=args.min_interval,
+        candle_book=candle_book,
     )
 
     loop = asyncio.get_running_loop()

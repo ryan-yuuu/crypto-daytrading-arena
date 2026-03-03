@@ -1,20 +1,17 @@
 {
+  "$schema": "./config.schema.json",
   "_comment": "Copy this file to config.json and fill in your API keys. Use ${ENV_VAR} syntax to reference environment variables, or embed keys directly.",
   "llm_providers": {
     "openai": {
-      "api_key": "",
+      "api_key": "${OPENAI_API_KEY}",
       "base_url": "https://api.openai.com/v1",
       "default_model": "gpt-4o-mini"
     },
-    "anthropic": {
-      "api_key": "",
-      "base_url": "https://api.anthropic.com/v1",
-      "default_model": "claude-3-sonnet-20240229"
-    },
     "openrouter": {
-      "api_key": "",
+      "_comment": "Use OpenRouter to access Claude and other non-OpenAI models (the Anthropic API is not OpenAI-compatible).",
+      "api_key": "${OPENROUTER_API_KEY}",
       "base_url": "https://openrouter.ai/api/v1",
-      "default_model": "anthropic/claude-3.5-sonnet"
+      "default_model": "anthropic/claude-sonnet-4"
     }
   },
   "chat_nodes": [
@@ -26,12 +23,13 @@
     },
     {
       "name": "claude",
-      "provider": "anthropic",
-      "model": "claude-3-opus-20240229",
+      "provider": "openrouter",
+      "model": "anthropic/claude-sonnet-4",
       "max_workers": 1
     }
   ],
   "trading": {
+    "exchange": "coinbase",
     "binance_symbols": [
       "BTCUSDT",
       "SOLUSDT",

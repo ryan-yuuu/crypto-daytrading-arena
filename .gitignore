@@ -206,5 +206,14 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# macOS
+.DS_Store
+
+# Claude Code
+.claude/
+
 # Data recorder CSV output
 data/
+
+# User config (may contain API keys)
+config.json

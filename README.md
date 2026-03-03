@@ -1,6 +1,6 @@
 # The Agents Trading Arena 🤖 🤺
 
-A multi-agent crypto trading arena where AI agents compete against each other, trading with live crypto market data from Coinbase. Each agent consumes a livestream of ticker data and standard candlestick charts, has access to its portfolio and calculator, and executes trades autonomously. This is all built with [Calfkit](https://github.com/calf-ai/calfkit-sdk) agents, namely for their multi-agent orchestration and realtime data streaming functionality.
+A multi-agent crypto trading arena where AI agents compete against each other, trading with live crypto market data from Coinbase or Binance. Each agent consumes a livestream of ticker data and standard candlestick charts, has access to its portfolio and calculator, and executes trades autonomously. This is all built with [Calfkit](https://github.com/calf-ai/calfkit-sdk) agents, namely for their multi-agent orchestration and realtime data streaming functionality.
 
 <br>
 
@@ -100,7 +100,7 @@ Once the broker is ready, open a new terminal tab to continue with the quickstar
 <details>
 <summary><strong>Option B: Calfkit cloud broker</strong></summary>
 
-There's also a [cloud broker](https://github.com/calf-ai/calfkit-sdk?tab=readme-ov-file#%EF%B8%8F-calfkit-cloud-coming-soon) version so you can simply use the cloud broker URL (which would be provided to you) to deploy your agents instead of setting up and maintaining a broker locally.
+There's also a [cloud broker](https://github.com/calf-ai/calfkit-sdk?tab=readme-ov-file#2-start-a-calfkit-broker) version so you can simply use the cloud broker URL (which would be provided to you) to deploy your agents instead of setting up and maintaining a broker locally.
 
 </details>
 
@@ -111,11 +111,7 @@ There's also a [cloud broker](https://github.com/calf-ai/calfkit-sdk?tab=readme-
 The easiest way to start is using the provided startup script:
 
 ```bash
-# Using Python (recommended)
 uv run python start_arena.py
-
-# Or using bash
-./start_arena.sh
 ```
 
 This will:
@@ -127,6 +123,9 @@ This will:
 
 **Options:**
 ```bash
+# Use Binance instead of Coinbase
+uv run python start_arena.py --exchange binance
+
 # Use cloud broker instead of local
 uv run python start_arena.py --cloud-broker <broker-url>
 
@@ -141,6 +140,8 @@ uv run python start_arena.py --api-key sk-... --model-id gpt-4o
 ```
 
 Press `Ctrl+C` to gracefully stop all components.
+
+<br>
 
 ---
 
@@ -159,14 +160,19 @@ Then launch each component in its own terminal. All components will access the s
 
 <br>
 
-### 1. Start the Coinbase connector
+### 1. Start the exchange connector
+
+Start either the Coinbase or Binance connector to stream live market data:
 
 ```bash
-uv run python coinbase_connector.py --bootstrap-servers <broker-url>
-# Or, source .venv/bin/activate && python coinbase_connector.py --bootstrap-servers <broker-url>
+# Coinbase (default)
+uv run python coinbase_kafka_connector.py --bootstrap-servers <broker-url>
+
+# Binance
+uv run python binance_kafka_connector.py --bootstrap-servers <broker-url>
 ```
 
-Optional: You can use the `--interval <seconds>` flag which controls how often agents are fed market data (default: 60s). Note that candle data is only updated every 60 seconds due to Coinbase API restrictions, so intervals below a minute mean agents will receive updated live pricing (bid/ask spread, ~5s granularity) but the same candle data.
+Optional: You can use the `--min-interval <seconds>` flag which controls how often agents are fed market data (default: 60s). Note that candle data is only updated every 60 seconds due to Coinbase API restrictions, so intervals below a minute mean agents will receive updated live pricing (bid/ask spread, ~5s granularity) but the same candle data.
 
 <br>
 
@@ -255,7 +261,7 @@ For full column descriptions and examples, see [docs/csv-data-recording.md](docs
 
 ## CLI Reference
 
-For full CLI flags and options, see [CLI_REFERENCE.md](CLI_REFERENCE.md).
+For full CLI flags and options, see [CLI_REFERENCE.md](docs/CLI_REFERENCE.md).
 
 <br>
 
@@ -274,4 +280,5 @@ For full CLI flags and options, see [CLI_REFERENCE.md](CLI_REFERENCE.md).
 | File | Constant | Default | Description |
 |------|----------|---------|-------------|
 | `trading_tools.py` | `INITIAL_CASH` | `100_000.0` | Starting cash balance per agent |
-| `coinbase_kafka_connector.py` | `DEFAULT_PRODUCTS` | 3 products | Products tracked by the price feed |
+| `coinbase_kafka_connector.py` | `DEFAULT_PRODUCTS` | 3 products | Coinbase products tracked by the price feed |
+| `binance_kafka_connector.py` | `DEFAULT_SYMBOLS` | 3 symbols | Binance symbols tracked by the price feed |

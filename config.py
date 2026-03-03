@@ -12,7 +12,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 DEFAULT_CONFIG_PATH = Path("config.json")
 
@@ -21,68 +23,72 @@ DEFAULT_BINANCE_SYMBOLS = ["BTCUSDT", "FARTCOINUSDT", "SOLUSDT"]
 DEFAULT_COINBASE_PRODUCTS = ["BTC-USD", "FARTCOIN-USD", "SOL-USD"]
 
 # Provider default endpoints
+# NOTE: The "anthropic" provider is listed for documentation purposes, but the
+# Anthropic API is NOT OpenAI-compatible. To use Claude models, configure them
+# via "openrouter" or another OpenAI-compatible proxy instead.
 PROVIDER_DEFAULTS = {
     "openai": {
         "base_url": "https://api.openai.com/v1",
         "default_model": "gpt-4o-mini",
     },
-    "anthropic": {
-        "base_url": "https://api.anthropic.com/v1",
-        "default_model": "claude-3-sonnet-20240229",
-    },
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1",
-        "default_model": "anthropic/claude-3.5-sonnet",
+        "default_model": "anthropic/claude-sonnet-4",
     },
 }
 
 
 class LLMProviderConfig(BaseModel):
-    """Configuration for an LLM provider."""
+    """Configuration for an LLM provider (must be OpenAI-compatible)."""
 
-    api_key: str = ""
-    base_url: str = ""
-    default_model: str = ""
-
-    @field_validator("api_key")
-    @classmethod
-    def resolve_api_key(cls, v: str) -> str:
-        """Resolve API key from env var if it uses ${VAR_NAME} syntax."""
-        if not v:
-            return v
-        match = re.match(r'^\$\{([^}]+)\}$', v)
-        if match:
-            env_var = match.group(1)
-            env_value = os.getenv(env_var, "")
-            if not env_value:
-                raise ValueError(f"Environment variable {env_var} is not set")
-            return env_value
-        return v
+    api_key: str = Field("", description="API key or ${ENV_VAR} reference.")
+    base_url: str = Field("", description="Base URL for the provider's API.")
+    default_model: str = Field("", description="Default model ID when not overridden by a ChatNode.")
 
 
 class ChatNodeConfig(BaseModel):
-    """Configuration for a ChatNode deployment."""
+    """A ChatNode deployment that provides LLM inference to agents."""
 
-    name: str
-    provider: str
-    model: str
-    max_workers: int = 1
-    reasoning_effort: str | None = None
+    name: str = Field(description="Unique name for this ChatNode (becomes the Kafka topic suffix).")
+    provider: str = Field(description="Key into llm_providers (e.g. 'openai', 'openrouter').")
+    model: str = Field(description="Model ID to use (e.g. 'gpt-4o', 'anthropic/claude-sonnet-4').")
+    max_workers: int = Field(1, description="Concurrent inference workers.", ge=1)
+    reasoning_effort: Literal["low", "medium", "high"] | None = Field(
+        None, description="Reasoning effort level for supported models."
+    )
 
 
 class TradingConfig(BaseModel):
     """Trading-related configuration."""
 
-    binance_symbols: list[str] = Field(default_factory=lambda: DEFAULT_BINANCE_SYMBOLS.copy())
-    coinbase_products: list[str] = Field(default_factory=lambda: DEFAULT_COINBASE_PRODUCTS.copy())
+    exchange: Literal["coinbase", "binance"] = Field(
+        "coinbase", description="Which exchange connector to use for market data."
+    )
+    binance_symbols: list[str] = Field(
+        default_factory=lambda: DEFAULT_BINANCE_SYMBOLS.copy(),
+        description="Binance trading pair symbols to subscribe to.",
+    )
+    coinbase_products: list[str] = Field(
+        default_factory=lambda: DEFAULT_COINBASE_PRODUCTS.copy(),
+        description="Coinbase product IDs to subscribe to.",
+    )
 
 
 class ArenaConfig(BaseModel):
     """Root configuration for the Trading Arena."""
 
-    llm_providers: dict[str, LLMProviderConfig] = Field(default_factory=dict)
-    chat_nodes: list[ChatNodeConfig] = Field(default_factory=list)
-    trading: TradingConfig = Field(default_factory=TradingConfig)
+    llm_providers: dict[str, LLMProviderConfig] = Field(
+        default_factory=dict,
+        description="Named LLM provider configurations. Keys are referenced by chat_nodes[].provider.",
+    )
+    chat_nodes: list[ChatNodeConfig] = Field(
+        default_factory=list,
+        description="ChatNode deployments. Each node targets a provider and model.",
+    )
+    trading: TradingConfig = Field(
+        default_factory=TradingConfig,
+        description="Exchange connector and trading pair configuration.",
+    )
 
     def get_provider_config(self, provider_name: str) -> LLMProviderConfig | None:
         """Get configuration for a specific provider."""
@@ -125,6 +131,7 @@ def resolve_env_vars(value: Any, path: str = "root") -> Any:
     elif isinstance(value, list):
         return [resolve_env_vars(item, f"{path}[{i}]") for i, item in enumerate(value)]
     return value
+
 
 def load_config(config_path: Path | str | None = None) -> ArenaConfig:
     """Load configuration from a file.

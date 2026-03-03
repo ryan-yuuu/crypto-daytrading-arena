@@ -3,23 +3,33 @@
 ## Configuration File
 
 The trading arena supports a JSON configuration file (`config.json` by default) for managing:
-- Multiple LLM providers (OpenAI, Anthropic, OpenRouter)
+- Multiple LLM providers (OpenAI, OpenRouter)
 - Multiple ChatNodes with different providers/models
-- Trading pairs for Binance and Coinbase
+- Exchange selection and trading pairs for Binance and Coinbase
+
+To get started, copy the example and fill in your API keys:
+```bash
+cp config.example.json config.json
+```
+
+> **Note:** `config.json` is gitignored to prevent accidental secret commits.
+
+For the full config schema with all fields, types, and defaults, see [`config.schema.json`](../config.schema.json). IDEs that support JSON Schema (VS Code, JetBrains) will provide autocompletion and validation automatically via the `$schema` reference in the config file.
 
 **Example config.json:**
 ```json
 {
+  "$schema": "./config.schema.json",
   "llm_providers": {
     "openai": {
       "api_key": "${OPENAI_API_KEY}",
       "base_url": "https://api.openai.com/v1",
       "default_model": "gpt-4o-mini"
     },
-    "anthropic": {
-      "api_key": "${ANTHROPIC_API_KEY}",
-      "base_url": "https://api.anthropic.com/v1",
-      "default_model": "claude-3-sonnet-20240229"
+    "openrouter": {
+      "api_key": "${OPENROUTER_API_KEY}",
+      "base_url": "https://openrouter.ai/api/v1",
+      "default_model": "anthropic/claude-sonnet-4"
     }
   },
   "chat_nodes": [
@@ -31,17 +41,20 @@ The trading arena supports a JSON configuration file (`config.json` by default) 
     },
     {
       "name": "claude",
-      "provider": "anthropic",
-      "model": "claude-3-opus-20240229",
+      "provider": "openrouter",
+      "model": "anthropic/claude-sonnet-4",
       "max_workers": 1
     }
   ],
   "trading": {
+    "exchange": "coinbase",
     "binance_symbols": ["BTCUSDT", "SOLUSDT", "FARTCOINUSDT"],
     "coinbase_products": ["BTC-USD", "SOL-USD", "FARTCOIN-USD"]
   }
 }
 ```
+
+> **Note:** The Anthropic API is not OpenAI-compatible. To use Claude models, configure them via the `openrouter` provider or another OpenAI-compatible proxy.
 
 **API Key Formats:**
 - Environment variable: `"${OPENAI_API_KEY}"` - Reads from env var at runtime
@@ -49,9 +62,9 @@ The trading arena supports a JSON configuration file (`config.json` by default) 
 
 ---
 
-## start_arena.py / start_arena.sh
+## start_arena.py
 
-Automated startup scripts that launch all components in the correct order.
+Automated startup that launches all components in the correct order.
 
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
@@ -61,6 +74,7 @@ Automated startup scripts that launch all components in the correct order.
 | `--api-key` | No | `$OPENAI_API_KEY` | API key for LLM provider (legacy mode) |
 | `--model-id` | No | `gpt-4o-mini` | Model ID for ChatNode (legacy mode) |
 | `--reasoning-effort` | No | — | Reasoning level: `low`, `medium`, `high` |
+| `--exchange` | No | `coinbase` | Exchange connector: `coinbase` or `binance` (overrides config) |
 | `--interval` | No | `60` | Market data update interval in seconds |
 | `--with-viewer` | No | — | Also start the response viewer |
 | `--skip-checks` | No | — | Skip prerequisite checks |
@@ -75,14 +89,15 @@ uv run python start_arena.py
 # Use custom config file
 uv run python start_arena.py --config my-config.json
 
+# Use Binance instead of Coinbase
+uv run python start_arena.py --exchange binance
+
 # Use cloud broker with custom model
 uv run python start_arena.py --cloud-broker broker.example.com:9092
 
 # Fast updates with all features
 uv run python start_arena.py --interval 30 --with-viewer
 
-# Using bash version
-./start_arena.sh --interval 30 --with-viewer
 ```
 
 ---
@@ -118,9 +133,9 @@ uv run python deploy_chat_node.py \
     --from-config gpt4o \
     --bootstrap-servers localhost:9092
 
-# Using OpenRouter
+# Using OpenRouter (for Claude and other non-OpenAI models)
 uv run python deploy_chat_node.py \
-    --name claude --model-id anthropic/claude-3.5-sonnet \
+    --name claude --model-id anthropic/claude-sonnet-4 \
     --base-url https://openrouter.ai/api/v1 \
     --api-key $OPENROUTER_API_KEY \
     --bootstrap-servers localhost:9092
