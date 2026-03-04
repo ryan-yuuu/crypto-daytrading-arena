@@ -12,6 +12,14 @@ A multi-agent crypto trading arena where AI agents compete against each other, t
 
 <br>
 
+If you find this project interesting or useful, please consider:
+
+- ⭐ Starring the repository — it helps others discover it!
+- 🐛 Reporting issues
+- 🔀 Submitting PRs
+
+<br>
+
 ## Architecture
 
 ```
