@@ -15,7 +15,7 @@ anyio==4.12.1
     #   openai
 async-timeout==5.0.1
     # via aiokafka
-calfkit==0.1.10
+calfkit==0.1.15
     # via crypto-daytrading-arena (pyproject.toml)
 certifi==2026.2.25
     # via

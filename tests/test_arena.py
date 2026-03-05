@@ -21,6 +21,7 @@ from calfkit.runners.service_client import RouterServiceClient
 from calfkit.stores.in_memory import InMemoryMessageHistoryStore
 
 from arena.models import INITIAL_CASH
+from arena.strategies import STRATEGIES
 from arena.tools import calculator, execute_trade, get_portfolio, price_book, store
 
 load_dotenv()
@@ -276,3 +277,74 @@ async def test_full_trading_session(deploy_broker):
         assert isinstance(final_msg, ModelResponse)
         assert final_msg.text is not None
         assert "btc" in final_msg.text.lower()
+
+
+@pytest.mark.asyncio
+@skip_if_no_openai_key
+async def test_autonomous_portfolio_check_and_trade(deploy_broker):
+    """Default-strategy agent checks portfolio and sells into a price spike in one turn.
+
+    Setup:
+    - Account pre-seeded with 1.0 BTC-USD at $50,010 cost basis
+    - BTC-USD live price spiked to $500,000 (10x unrealized gain)
+
+    The agent should autonomously:
+    1. Call get_portfolio — discover BTC position with massive unrealized P&L
+    2. Call execute_trade — sell some/all BTC to lock in profits
+
+    Both tool calls occur within a single client.request() invocation, proving the
+    agent makes multiple autonomous tool calls in one turn.
+    """
+    broker = deploy_broker
+    router = AgentRouterNode(
+        chat_node=ChatNode(),
+        tool_nodes=[execute_trade, get_portfolio, calculator],
+        name="autonomous_trader",
+        system_prompt=STRATEGIES["default"],
+    )
+
+    # Pre-seed the arena_router account with a BTC position
+    account = store.get_or_create(ROUTER_NAME)
+    account.positions["BTC-USD"] = 1.0
+    account.cost_basis["BTC-USD"] = 50_010.0  # avg cost $50,010 (original best_ask)
+    account.cash = INITIAL_CASH - 50_010.0  # $49,990 remaining
+
+    # Spike BTC price to $500,000 — a 10x move over cost basis
+    price_book.update({
+        "product_id": "BTC-USD",
+        "price": "500000.00",
+        "best_bid": "499500.00",
+        "best_bid_size": "5.0",
+        "best_ask": "500500.00",
+        "best_ask_size": "3.0",
+        "side": "buy",
+        "last_size": "0.5",
+        "volume_24h": "25000.0",
+        "time": "2024-01-01T12:00:00Z",
+    })
+
+    async with TestKafkaBroker(broker):
+        client = RouterServiceClient(broker, router)
+        ticker_json = (
+            '[{"product_id": "BTC-USD", "price": "500000.00", '
+            '"best_bid": "499500.00", "best_ask": "500500.00"}, '
+            '{"product_id": "SOL-USD", "price": "100.00", '
+            '"best_bid": "99.90", "best_ask": "100.10"}]'
+        )
+        response = await client.request(
+            user_prompt=(
+                "Here is the latest ticker information. You should view your "
+                "portfolio first before making any decisions to trade.\n"
+                "price = last traded price, best_bid = price you sell at, "
+                "best_ask = price you buy at.\n\n"
+                f"{ticker_json}"
+            ),
+        )
+        final_msg = await asyncio.wait_for(response.get_final_response(), timeout=45.0)
+        assert isinstance(final_msg, ModelResponse)
+
+    account = _account()
+    assert account.trade_count > 0, "Agent should have executed at least one trade"
+    pre_trade_cash = INITIAL_CASH - 50_010.0
+    assert account.cash > pre_trade_cash, "Cash should have increased from selling BTC"
+    assert account.positions.get("BTC-USD", 0) < 1.0, "Agent should have sold some/all BTC"
