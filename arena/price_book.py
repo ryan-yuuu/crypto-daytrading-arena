@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import io
+import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
 
 from arena.models import Candle, Timeframe, TIMEFRAMES
+
+log = logging.getLogger(__name__)
 
 
 class PriceBook:
@@ -16,7 +19,8 @@ class PriceBook:
         self._book: dict[str, dict] = {}
 
     def update(self, data: dict) -> None:
-        self._book[data["product_id"]] = {
+        product_id = data["product_id"]
+        self._book[product_id] = {
             "price": data["price"],
             "best_bid": data["best_bid"],
             "best_bid_size": data.get("best_bid_size", "0"),
@@ -27,9 +31,17 @@ class PriceBook:
             "volume_24h": data.get("volume_24h", "0"),
             "time": data.get("time", ""),
         }
+        log.debug(
+            "price_book.update: %s price=%s bid=%s ask=%s",
+            product_id, data["price"], data["best_bid"], data["best_ask"],
+        )
 
     def get(self, product_id: str) -> dict | None:
-        return self._book.get(product_id)
+        entry = self._book.get(product_id)
+        if entry is None:
+            log.debug("price_book.get: %s -> NOT FOUND (available: %s)",
+                      product_id, list(self._book.keys()))
+        return entry
 
     def snapshot(self) -> dict[str, dict]:
         return dict(self._book)

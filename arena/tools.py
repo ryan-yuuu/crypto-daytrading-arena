@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from datetime import datetime
@@ -14,6 +15,8 @@ from calfkit.nodes.base_tool_node import agent_tool
 from arena.account_store import AccountStore
 from arena.dashboard import PortfolioView
 from arena.price_book import PriceBook
+
+log = logging.getLogger(__name__)
 
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
@@ -30,7 +33,15 @@ view = PortfolioView(store)
 def _execute_trade(
     agent_id: str, product_id: str, quantity: float, action: str, latency: float | None = None
 ) -> str:
+    log.debug(
+        "tool._execute_trade called: agent=%s action=%s product=%s qty=%s latency=%s",
+        agent_id, action, product_id, quantity, latency,
+    )
     result = store.execute_trade(agent_id, product_id, quantity, action, latency=latency)
+    log.debug(
+        "tool._execute_trade result: agent=%s success=%s message=%s",
+        agent_id, result.success, result.message,
+    )
     view.rerender()
     return result.message
 
@@ -52,6 +63,7 @@ def _format_hold_time(entry_ts: float | None) -> str:
 
 
 def _get_portfolio(agent_id: str) -> str:
+    log.debug("tool._get_portfolio called: agent=%s", agent_id)
     account = store.get_or_create(agent_id)
     pb = store.price_book
 
@@ -91,6 +103,10 @@ def _get_portfolio(agent_id: str) -> str:
     portfolio_val = account.portfolio_value(pb)
     lines.append(f"\nTotal portfolio value: ${portfolio_val:,.2f}")
 
+    log.debug(
+        "tool._get_portfolio result: agent=%s cash=%.2f positions=%s portfolio_value=%.2f",
+        agent_id, account.cash, dict(account.positions), portfolio_val,
+    )
     return "\n".join(lines)
 
 
@@ -112,10 +128,16 @@ def execute_trade(ctx: ToolContext, product_id: str, quantity: float, action: st
     Returns:
         Trade confirmation with execution price and remaining cash, or an error message
     """
+    log.debug(
+        "execute_trade ENTER: agent=%s product=%s qty=%s action=%s tool_call_id=%s",
+        ctx.agent_name, product_id, quantity, action, ctx.tool_call_id,
+    )
     latency: float | None = None
     if isinstance(ctx.deps, dict) and "invoked_at" in ctx.deps:
         latency = time.time() - ctx.deps["invoked_at"]
-    return _execute_trade(ctx.agent_name, product_id, quantity, action, latency=latency)
+    result = _execute_trade(ctx.agent_name, product_id, quantity, action, latency=latency)
+    log.debug("execute_trade EXIT: agent=%s tool_call_id=%s", ctx.agent_name, ctx.tool_call_id)
+    return result
 
 
 @agent_tool
@@ -126,7 +148,12 @@ def get_portfolio(ctx: ToolContext) -> str:
         A table of positions with quantity, average cost basis, current market
         price, unrealized P&L, and average time held — plus cash and total value
     """
-    return _get_portfolio(ctx.agent_name)
+    log.debug(
+        "get_portfolio ENTER: agent=%s tool_call_id=%s", ctx.agent_name, ctx.tool_call_id
+    )
+    result = _get_portfolio(ctx.agent_name)
+    log.debug("get_portfolio EXIT: agent=%s tool_call_id=%s", ctx.agent_name, ctx.tool_call_id)
+    return result
 
 
 @agent_tool
@@ -146,8 +173,15 @@ def calculator(ctx: ToolContext, expression: str) -> str:
         The numeric result
     """
 
+    log.debug(
+        "calculator ENTER: agent=%s expression=%r tool_call_id=%s",
+        ctx.agent_name, expression, ctx.tool_call_id,
+    )
     try:
         result = sympy.sympify(expression)
-        return str(result.evalf() if not result.is_number else result)
+        value = str(result.evalf() if not result.is_number else result)
+        log.debug("calculator EXIT: agent=%s result=%s", ctx.agent_name, value)
+        return value
     except (sympy.SympifyError, TypeError) as e:
+        log.debug("calculator EXIT (error): agent=%s error=%s", ctx.agent_name, e)
         return f"Invalid expression: {e}"

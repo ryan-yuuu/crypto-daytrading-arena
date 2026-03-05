@@ -133,10 +133,10 @@ Start either the Coinbase or Binance connector to stream live market data:
 
 ```bash
 # Coinbase (default)
-uv run python exchanges/coinbase.py --bootstrap-servers <broker-url>
+uv run python -m exchanges.coinbase --bootstrap-servers <broker-url>
 
 # Or, Binance (experimental)
-# uv run python exchanges/binance.py --bootstrap-servers <broker-url>
+# uv run python -m exchanges.binance --bootstrap-servers <broker-url>
 ```
 
 Optional: You can use the `--min-interval <seconds>` flag which controls how often agents are fed market data (default: 60s). Note that candle data is only updated every 60 seconds due to Coinbase API restrictions, so intervals below a minute mean agents will receive updated live pricing (bid/ask spread, ~5s granularity) but the same candle data.
@@ -146,7 +146,7 @@ Optional: You can use the `--min-interval <seconds>` flag which controls how oft
 ### 2. Deploy tools & dashboard
 
 ```bash
-uv run python deploy/tools_and_dashboard.py --bootstrap-servers <broker-url>
+uv run python -m deploy.tools_and_dashboard --bootstrap-servers <broker-url>
 ```
 
 <br>
@@ -158,12 +158,12 @@ Note: ChatNodes are stateless so multiple agents can share the same ChatNode.
 
 ```bash
 # OpenAI model
-uv run python deploy/chat_node.py \
+uv run python -m deploy.chat_node \
     --name <unique-name-of-chatnode> --model-id <openai-model-id> --bootstrap-servers <broker-url> \
     --reasoning-effort <optional-reasoning-level> --api-key <api-key>
 
 # Or, any OpenAI-compatible provider (e.g. DeepInfra, Gemini, etc.)
-# uv run python deploy/chat_node.py \
+# uv run python -m deploy.chat_node \
 #     --name <unique-name-of-chatnode> --model-id <model-id> --bootstrap-servers <broker-url> \
 #     --base-url <llm-provider-base-url> --reasoning-effort <optional-reasoning-level> --api-key <api-key>
 ```
@@ -175,7 +175,7 @@ uv run python deploy/chat_node.py \
 Deploy an agent that targets a ChatNode you define by name and uses a trading strategy you can edit in `arena/strategies.py`. See `arena/strategies.py` for the full system prompts.
 
 ```bash
-uv run python deploy/router_node.py \
+uv run python -m deploy.router_node \
     --name <unique-agent-name> --chat-node-name <name-of-chatnode> \
     --strategy <strategy> --bootstrap-servers <broker-url>
 ```
@@ -189,7 +189,7 @@ Once agent routers are deployed, market data flows to the agents and trades shou
 A live dashboard that shows all agent activity, such as tool calls, text responses (agent reasoning), and tool results, as they happen.
 
 ```bash
-uv run python deploy/response_viewer.py --bootstrap-servers <broker-url>
+uv run python -m deploy.response_viewer --bootstrap-servers <broker-url>
 ```
 
 <br>
@@ -204,7 +204,7 @@ All trades and periodic portfolio snapshots are automatically saved to CSV files
 You can configure the snapshot interval and output directory:
 
 ```bash
-uv run python deploy/tools_and_dashboard.py \
+uv run python -m deploy.tools_and_dashboard \
     --bootstrap-servers <broker-url> \
     --snapshot-interval <default-600-seconds> \
     --data-dir ./data

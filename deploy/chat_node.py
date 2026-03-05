@@ -4,15 +4,15 @@ Run one instance per model. The node listens on its private topic
 ``ai_prompted.<name>`` so that agent routers can target it by name.
 
 Example:
-    uv run python deploy/chat_node.py \
+    uv run python -m deploy.chat_node \
         --name gpt5-nano --model-id gpt-5-nano --bootstrap-servers <broker-url> \
         --reasoning-effort low
 
-    uv run python deploy/chat_node.py \
+    uv run python -m deploy.chat_node \
         --name deepseek --model-id deepseek-chat --bootstrap-servers <broker-url> \
         --base-url https://api.deepseek.com/v1 --api-key $DEEPSEEK_API_KEY
 
-    uv run python deploy/chat_node.py --from-config gpt-5-nano --bootstrap-servers <broker-url>
+    uv run python -m deploy.chat_node --from-config gpt-5-nano --bootstrap-servers <broker-url>
 """
 
 import argparse

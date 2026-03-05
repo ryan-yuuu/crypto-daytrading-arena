@@ -2,9 +2,9 @@
 and Kafka connector in a single module.
 
 Usage:
-    uv run python exchanges/binance.py
-    uv run python exchanges/binance.py --symbols BTCUSDT ETHUSDT SOLUSDT
-    uv run python exchanges/binance.py --min-interval 30
+    uv run python -m exchanges.binance
+    uv run python -m exchanges.binance --symbols BTCUSDT ETHUSDT SOLUSDT
+    uv run python -m exchanges.binance --min-interval 30
 """
 
 from __future__ import annotations
@@ -491,11 +491,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--min-interval",
         type=float,
-        default=0.0,
+        default=60.0,
         help=(
             "Minimum seconds between publishes per symbol. "
             "Incoming data is buffered and only the latest per symbol is published "
-            "when the interval elapses. 0 = publish immediately (default: 0)."
+            "when the interval elapses. 0 = publish immediately (default: 60)."
         ),
     )
     parser.add_argument(
@@ -554,13 +554,7 @@ def main() -> None:
         datefmt="%H:%M:%S",
     )
 
-    router_node = AgentRouterNode(
-        chat_node=ChatNode(),
-        tool_nodes=[],
-        message_history_store=InMemoryMessageHistoryStore(),
-        system_prompt="You are a market data consumer.",
-    )
-    asyncio.run(run(args, router_node))
+    asyncio.run(run(args, AgentRouterNode()))
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ Run this in a separate terminal alongside the main tools_and_dashboard
 to get visibility into agent reasoning.
 
 Example:
-    uv run python deploy/response_viewer.py \
+    uv run python -m deploy.response_viewer \
         --bootstrap-servers <broker-url>
 
 Prerequisites:

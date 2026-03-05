@@ -2,9 +2,9 @@
 and Kafka connector in a single module.
 
 Usage:
-    uv run python exchanges/coinbase.py
-    uv run python exchanges/coinbase.py --products BTC-USD ETH-USD SOL-USD
-    uv run python exchanges/coinbase.py --min-interval 30
+    uv run python -m exchanges.coinbase
+    uv run python -m exchanges.coinbase --products BTC-USD ETH-USD SOL-USD
+    uv run python -m exchanges.coinbase --min-interval 30
 """
 
 import argparse
@@ -294,11 +294,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--min-interval",
         type=float,
-        default=0.0,
+        default=60.0,
         help=(
             "Minimum seconds between publishes per product. "
             "Incoming data is buffered and only the latest per product is published "
-            "when the interval elapses. 0 = publish immediately (default: 0)."
+            "when the interval elapses. 0 = publish immediately (default: 60)."
         ),
     )
     parser.add_argument(
@@ -345,8 +345,6 @@ async def run(args: argparse.Namespace, router_node: AgentRouterNode) -> None:
 
 
 def main() -> None:
-    from calfkit.nodes.chat_node import ChatNode
-    from calfkit.stores.in_memory import InMemoryMessageHistoryStore
 
     args = parse_args()
     logging.basicConfig(
@@ -355,13 +353,7 @@ def main() -> None:
         datefmt="%H:%M:%S",
     )
 
-    router_node = AgentRouterNode(
-        chat_node=ChatNode(),
-        tool_nodes=[],
-        message_history_store=InMemoryMessageHistoryStore(),
-        system_prompt="You are a market data consumer.",
-    )
-    asyncio.run(run(args, router_node))
+    asyncio.run(run(args, AgentRouterNode()))
 
 
 if __name__ == "__main__":

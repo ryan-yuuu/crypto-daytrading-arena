@@ -27,7 +27,7 @@ from arena.tools import (
 # tools read from when executing trades.
 #
 # Usage:
-#     uv run python deploy/tools_and_dashboard.py
+#     uv run python -m deploy.tools_and_dashboard
 #
 # Prerequisites:
 #     - Kafka broker running at localhost:9092

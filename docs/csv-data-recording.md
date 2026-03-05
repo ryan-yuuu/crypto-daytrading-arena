@@ -14,11 +14,11 @@ Recording is enabled by default with a 10-minute snapshot interval. Configure vi
 
 ```bash
 # Custom snapshot interval (seconds) and output directory
-uv run python deploy/tools_and_dashboard.py --bootstrap-servers localhost:9092 \
+uv run python -m deploy.tools_and_dashboard --bootstrap-servers localhost:9092 \
   --snapshot-interval 60 --data-dir ./data
 
 # Disable recording entirely
-uv run python deploy/tools_and_dashboard.py --bootstrap-servers localhost:9092 \
+uv run python -m deploy.tools_and_dashboard --bootstrap-servers localhost:9092 \
   --snapshot-interval 0
 ```
 

@@ -83,18 +83,18 @@ Deploy a ChatNode for LLM inference. Can use explicit CLI args or load from conf
 **Examples:**
 ```bash
 # Explicit configuration
-uv run python deploy/chat_node.py \
+uv run python -m deploy.chat_node \
     --name gpt-5-nano --model-id gpt-5-nano \
     --bootstrap-servers localhost:9092 \
     --api-key $OPENAI_API_KEY
 
 # Load from config file
-uv run python deploy/chat_node.py \
+uv run python -m deploy.chat_node \
     --from-config gpt-5-nano \
     --bootstrap-servers localhost:9092
 
 # Using OpenRouter (for Claude and other non-OpenAI models)
-uv run python deploy/chat_node.py \
+uv run python -m deploy.chat_node \
     --name claude --model-id anthropic/claude-sonnet-4 \
     --base-url https://openrouter.ai/api/v1 \
     --api-key $OPENROUTER_API_KEY \
@@ -121,16 +121,16 @@ Stream real-time market data from Binance to Kafka.
 | `--bootstrap-servers` | No | `localhost:9092` | Kafka broker address |
 | `--config` | No | `config.json` | Path to config file for symbols |
 | `--symbols` | No | From config | Binance symbols to subscribe (overrides config) |
-| `--min-interval` | No | `0` | Minimum seconds between publishes |
+| `--min-interval` | No | `60` | Minimum seconds between publishes |
 | `--log-level` | No | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
 **Examples:**
 ```bash
 # Use symbols from config file
-uv run python exchanges/binance.py --bootstrap-servers localhost:9092
+uv run python -m exchanges.binance --bootstrap-servers localhost:9092
 
 # Override with specific symbols
-uv run python exchanges/binance.py \
+uv run python -m exchanges.binance \
     --bootstrap-servers localhost:9092 \
     --symbols BTCUSDT ETHUSDT SOLUSDT
 ```
@@ -146,16 +146,16 @@ Stream real-time market data from Coinbase to Kafka.
 | `--bootstrap-servers` | No | `localhost:9092` | Kafka broker address |
 | `--config` | No | `config.json` | Path to config file for products |
 | `--products` | No | From config | Coinbase products to subscribe (overrides config) |
-| `--min-interval` | No | `0` | Minimum seconds between publishes |
+| `--min-interval` | No | `60` | Minimum seconds between publishes |
 | `--log-level` | No | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
 **Examples:**
 ```bash
 # Use products from config file
-uv run python exchanges/coinbase.py --bootstrap-servers localhost:9092
+uv run python -m exchanges.coinbase --bootstrap-servers localhost:9092
 
 # Override with specific products
-uv run python exchanges/coinbase.py \
+uv run python -m exchanges.coinbase \
     --bootstrap-servers localhost:9092 \
     --products BTC-USD ETH-USD SOL-USD
 ```
