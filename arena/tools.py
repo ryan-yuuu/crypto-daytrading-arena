@@ -9,8 +9,7 @@ from datetime import datetime
 
 import sympy
 
-from calfkit.models.tool_context import ToolContext
-from calfkit.nodes.base_tool_node import agent_tool
+from calfkit import ToolContext, agent_tool
 
 from arena.account_store import AccountStore
 from arena.dashboard import PortfolioView
@@ -133,8 +132,8 @@ def execute_trade(ctx: ToolContext, product_id: str, quantity: float, action: st
         ctx.agent_name, product_id, quantity, action, ctx.tool_call_id,
     )
     latency: float | None = None
-    if isinstance(ctx.deps, dict) and "invoked_at" in ctx.deps:
-        latency = time.time() - ctx.deps["invoked_at"]
+    if isinstance(ctx.deps.provided_deps, dict) and "invoked_at" in ctx.deps.provided_deps:
+        latency = time.time() - ctx.deps.provided_deps["invoked_at"]
     result = _execute_trade(ctx.agent_name, product_id, quantity, action, latency=latency)
     log.debug("execute_trade EXIT: agent=%s tool_call_id=%s", ctx.agent_name, ctx.tool_call_id)
     return result
