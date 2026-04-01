@@ -11,23 +11,16 @@ import pytest
 from dotenv import load_dotenv
 from faststream.kafka import TestKafkaBroker
 
-from calfkit._vendor.pydantic_ai import ModelResponse
-from calfkit.broker.broker import BrokerClient
-from calfkit.nodes.agent_router_node import AgentRouterNode
-from calfkit.nodes.chat_node import ChatNode
-from calfkit.providers.pydantic_ai.openai import OpenAIModelClient
-from calfkit.runners.service import NodesService
-from calfkit.runners.service_client import RouterServiceClient
-from calfkit.stores.in_memory import InMemoryMessageHistoryStore
+from calfkit import Agent, Client, OpenAIModelClient, Worker
 
 from arena.models import INITIAL_CASH
-from arena.strategies import STRATEGIES
 from arena.tools import calculator, execute_trade, get_portfolio, price_book, store
 
 load_dotenv()
 
-# The deployed router processes all requests; trades are recorded under its name.
-ROUTER_NAME = "arena_router"
+# The deployed agent processes all requests; trades are recorded under its name.
+AGENT_NAME = "arena_agent"
+AGENT_INPUT_TOPIC = "agent_router.input"
 
 skip_if_no_openai_key = pytest.mark.skipif(
     not os.getenv("OPENAI_API_KEY"),
@@ -80,43 +73,42 @@ def seed_price_book():
 
 
 @pytest.fixture(scope="session")
-def deploy_broker() -> BrokerClient:
-    """Wire up all arena worker nodes on a BrokerClient.
+def deploy_client() -> Client:
+    """Wire up all arena worker nodes on a Client.
 
-    Registers: ChatNode (LLM), tool nodes, and a router node.
-    The router processes all incoming requests. Test-created routers
-    serve as client references that define system_prompt and tool selection
-    (packaged into the EventEnvelope), but the deployed router executes them.
+    Registers: Agent (with embedded model client) and tool nodes.
+    The agent processes all incoming requests via the Worker.
+
+    NOTE: temp_instructions on execute_node() are silently dropped by
+    pydantic-ai's UserPromptNode — only the Agent's system_prompt reaches
+    the model. This system_prompt must work for all tests.
     """
-    broker = BrokerClient()
-    service = NodesService(broker)
+    client = Client.connect()
 
-    # ChatNode worker (LLM inference)
-    model_client = OpenAIModelClient("gpt-5-nano", reasoning_effort="low")
-    chat_node = ChatNode(model_client)
-    service.register_node(chat_node)
+    model_client = OpenAIModelClient("gpt-5-nano", reasoning_effort="high")
 
-    # Tool node workers
-    service.register_node(execute_trade)
-    service.register_node(get_portfolio)
-    service.register_node(calculator)
-
-    # Router node (subscriber for agent_router.input)
-    all_tools = [execute_trade, get_portfolio, calculator]
-    router_node = AgentRouterNode(
-        chat_node=ChatNode(),
-        tool_nodes=all_tools,
-        message_history_store=InMemoryMessageHistoryStore(),
-        name=ROUTER_NAME,
+    # Agent node (subscriber for agent_router.input)
+    agent = Agent(
+        AGENT_NAME,
+        system_prompt=(
+            "You are an obedient trading bot. Execute trades immediately when asked. "
+            "Use tools to check your portfolio and make trades. Never ask for confirmation. "
+            "When you see large unrealized gains, sell to lock in profits. Always act decisively."
+        ),
+        subscribe_topics=AGENT_INPUT_TOPIC,
+        model_client=model_client,
+        tools=[execute_trade, get_portfolio, calculator],
     )
-    service.register_node(router_node)
 
-    return broker
+    worker = Worker(client, nodes=[agent, execute_trade, get_portfolio, calculator])
+    worker.register_handlers()
+
+    return client
 
 
 def _account():
-    """Get the arena router's account from the shared store."""
-    return store.get_or_create(ROUTER_NAME)
+    """Get the arena agent's account from the shared store."""
+    return store.get_or_create(AGENT_NAME)
 
 
 # ── Tests ───────────────────────────────────────────────────────
@@ -124,24 +116,16 @@ def _account():
 
 @pytest.mark.asyncio
 @skip_if_no_openai_key
-async def test_agent_executes_trade(deploy_broker):
+async def test_agent_executes_trade(deploy_client):
     """Agent receives a prompt and executes a BTC buy via the execute_trade tool."""
-    broker = deploy_broker
-    router = AgentRouterNode(
-        chat_node=ChatNode(),
-        tool_nodes=[execute_trade, get_portfolio, calculator],
-        name="trade_tester",
-        system_prompt=(
-            "You are a test trading agent. When the user asks you to buy, "
-            "use the execute_trade tool immediately. Do not ask for confirmation."
-        ),
-    )
+    client = deploy_client
 
-    async with TestKafkaBroker(broker):
-        client = RouterServiceClient(broker, router)
-        response = await client.request(user_prompt="Buy 0.1 BTC-USD right now.")
-        final_msg = await asyncio.wait_for(response.get_final_response(), timeout=30.0)
-        assert isinstance(final_msg, ModelResponse)
+    async with TestKafkaBroker(client.broker):
+        await client.execute_node(
+            user_prompt="Buy 0.1 BTC-USD right now.",
+            topic=AGENT_INPUT_TOPIC,
+            timeout=30.0,
+        )
 
         account = _account()
         assert account.positions.get("BTC-USD", 0) > 0, "Agent should have bought BTC"
@@ -151,112 +135,80 @@ async def test_agent_executes_trade(deploy_broker):
 
 @pytest.mark.asyncio
 @skip_if_no_openai_key
-async def test_agent_checks_portfolio(deploy_broker):
+async def test_agent_checks_portfolio(deploy_client):
     """Agent uses get_portfolio tool and reports back."""
-    broker = deploy_broker
-    router = AgentRouterNode(
-        chat_node=ChatNode(),
-        tool_nodes=[get_portfolio],
-        name="portfolio_viewer",
-        system_prompt=(
-            "You are a helpful trading assistant. When asked about the portfolio, "
-            "always use the get_portfolio tool and relay the results."
-        ),
-    )
+    client = deploy_client
 
-    async with TestKafkaBroker(broker):
-        client = RouterServiceClient(broker, router)
-        response = await client.request(user_prompt="What does my portfolio look like?")
-        final_msg = await asyncio.wait_for(response.get_final_response(), timeout=30.0)
-        assert isinstance(final_msg, ModelResponse)
-        assert final_msg.text is not None
-        assert "100,000" in final_msg.text or "100000" in final_msg.text
+    async with TestKafkaBroker(client.broker):
+        result = await client.execute_node(
+            user_prompt="What does my portfolio look like?",
+            topic=AGENT_INPUT_TOPIC,
+            timeout=30.0,
+        )
+
+        assert result.output is not None
+        assert "100,000" in str(result.output) or "100000" in str(result.output)
 
 
 @pytest.mark.asyncio
 @skip_if_no_openai_key
-async def test_multi_turn_trading(deploy_broker):
+async def test_multi_turn_trading(deploy_client):
     """Multi-turn conversation: buy, then check portfolio across turns."""
-    broker = deploy_broker
-    router = AgentRouterNode(
-        chat_node=ChatNode(),
-        tool_nodes=[execute_trade, get_portfolio],
-        name="multi_turn_trader",
-        system_prompt=(
-            "You are a trading assistant. Execute trades when asked. "
-            "Check portfolio when asked. Be concise."
-        ),
-    )
-    thread_id = "test-multi-turn"
+    client = deploy_client
 
-    async with TestKafkaBroker(broker):
-        client = RouterServiceClient(broker, router)
-
+    async with TestKafkaBroker(client.broker):
         # Turn 1: Buy SOL
-        response = await client.request(user_prompt="Buy 5 SOL-USD", thread_id=thread_id)
-        final_msg = await asyncio.wait_for(response.get_final_response(), timeout=30.0)
-        assert isinstance(final_msg, ModelResponse)
+        result = await client.execute_node(
+            user_prompt="Buy 5 SOL-USD",
+            topic=AGENT_INPUT_TOPIC,
+            timeout=30.0,
+        )
 
         account = _account()
         assert account.positions.get("SOL-USD", 0) > 0, "Should have bought SOL"
 
-        # Turn 2: Check portfolio (should show SOL position)
-        response = await client.request(
-            user_prompt="Show me my current portfolio", thread_id=thread_id
+        # Turn 2: Check portfolio (pass message_history for multi-turn)
+        result = await client.execute_node(
+            user_prompt="Show me my current portfolio",
+            topic=AGENT_INPUT_TOPIC,
+            message_history=result.message_history,
+            timeout=30.0,
         )
-        final_msg = await asyncio.wait_for(response.get_final_response(), timeout=30.0)
-        assert isinstance(final_msg, ModelResponse)
-        assert final_msg.text is not None
-        assert "sol" in final_msg.text.lower(), "Portfolio should mention SOL position"
+
+        assert result.output is not None
+        assert "sol" in str(result.output).lower(), "Portfolio should mention SOL position"
 
 
 @pytest.mark.asyncio
 @skip_if_no_openai_key
-async def test_agent_uses_calculator(deploy_broker):
+async def test_agent_uses_calculator(deploy_client):
     """Agent uses the calculator tool for a math question."""
-    broker = deploy_broker
-    router = AgentRouterNode(
-        chat_node=ChatNode(),
-        tool_nodes=[calculator, get_portfolio],
-        name="calc_tester",
-        system_prompt=(
-            "You are a trading assistant with a calculator. "
-            "Always use the calculator tool for any math calculations. "
-            "Report the exact result from the calculator."
-        ),
-    )
+    client = deploy_client
 
-    async with TestKafkaBroker(broker):
-        client = RouterServiceClient(broker, router)
-        response = await client.request(user_prompt="Use the calculator to compute 50000 * 0.1")
-        final_msg = await asyncio.wait_for(response.get_final_response(), timeout=30.0)
-        assert isinstance(final_msg, ModelResponse)
-        assert final_msg.text is not None
-        assert "5000" in final_msg.text
+    async with TestKafkaBroker(client.broker):
+        result = await client.execute_node(
+            user_prompt="Use the calculator to compute 50000 * 0.1",
+            topic=AGENT_INPUT_TOPIC,
+            timeout=30.0,
+        )
+
+        assert result.output is not None
+        assert "5000" in str(result.output)
 
 
 @pytest.mark.asyncio
 @skip_if_no_openai_key
-async def test_full_trading_session(deploy_broker):
+async def test_full_trading_session(deploy_client):
     """End-to-end session: buy, sell, check portfolio."""
-    broker = deploy_broker
-    router = AgentRouterNode(
-        chat_node=ChatNode(),
-        tool_nodes=[execute_trade, get_portfolio, calculator],
-        name="full_session_trader",
-        system_prompt=(
-            "You are an obedient trading bot. Execute exactly what is asked. "
-            "Do not ask for confirmation. Do not add extra trades."
-        ),
-    )
-    thread_id = "test-full-session"
+    client = deploy_client
 
-    async with TestKafkaBroker(broker):
-        client = RouterServiceClient(broker, router)
-
+    async with TestKafkaBroker(client.broker):
         # Buy BTC
-        response = await client.request(user_prompt="Buy 0.5 BTC-USD", thread_id=thread_id)
-        await asyncio.wait_for(response.get_final_response(), timeout=30.0)
+        result = await client.execute_node(
+            user_prompt="Buy 0.5 BTC-USD",
+            topic=AGENT_INPUT_TOPIC,
+            timeout=30.0,
+        )
 
         account = _account()
         assert account.positions.get("BTC-USD", 0) == 0.5
@@ -264,24 +216,32 @@ async def test_full_trading_session(deploy_broker):
         assert account.cash == pytest.approx(INITIAL_CASH - expected_cost, rel=1e-2)
 
         # Sell some
-        response = await client.request(user_prompt="Sell 0.2 BTC-USD", thread_id=thread_id)
-        await asyncio.wait_for(response.get_final_response(), timeout=30.0)
+        result = await client.execute_node(
+            user_prompt="Sell 0.2 BTC-USD",
+            topic=AGENT_INPUT_TOPIC,
+            message_history=result.message_history,
+            timeout=30.0,
+        )
 
         account = _account()
         assert account.positions.get("BTC-USD", 0) == 0.3
         assert account.trade_count == 2
 
         # Check portfolio mentions BTC
-        response = await client.request(user_prompt="Show my portfolio", thread_id=thread_id)
-        final_msg = await asyncio.wait_for(response.get_final_response(), timeout=30.0)
-        assert isinstance(final_msg, ModelResponse)
-        assert final_msg.text is not None
-        assert "btc" in final_msg.text.lower()
+        result = await client.execute_node(
+            user_prompt="Show my portfolio",
+            topic=AGENT_INPUT_TOPIC,
+            message_history=result.message_history,
+            timeout=30.0,
+        )
+
+        assert result.output is not None
+        assert "btc" in str(result.output).lower()
 
 
 @pytest.mark.asyncio
 @skip_if_no_openai_key
-async def test_autonomous_portfolio_check_and_trade(deploy_broker):
+async def test_autonomous_portfolio_check_and_trade(deploy_client):
     """Default-strategy agent checks portfolio and sells into a price spike in one turn.
 
     Setup:
@@ -292,19 +252,13 @@ async def test_autonomous_portfolio_check_and_trade(deploy_broker):
     1. Call get_portfolio — discover BTC position with massive unrealized P&L
     2. Call execute_trade — sell some/all BTC to lock in profits
 
-    Both tool calls occur within a single client.request() invocation, proving the
+    Both tool calls occur within a single execute_node() invocation, proving the
     agent makes multiple autonomous tool calls in one turn.
     """
-    broker = deploy_broker
-    router = AgentRouterNode(
-        chat_node=ChatNode(),
-        tool_nodes=[execute_trade, get_portfolio, calculator],
-        name="autonomous_trader",
-        system_prompt=STRATEGIES["default"],
-    )
+    client = deploy_client
 
-    # Pre-seed the arena_router account with a BTC position
-    account = store.get_or_create(ROUTER_NAME)
+    # Pre-seed the arena_agent account with a BTC position
+    account = store.get_or_create(AGENT_NAME)
     account.positions["BTC-USD"] = 1.0
     account.cost_basis["BTC-USD"] = 50_010.0  # avg cost $50,010 (original best_ask)
     account.cash = INITIAL_CASH - 50_010.0  # $49,990 remaining
@@ -323,15 +277,15 @@ async def test_autonomous_portfolio_check_and_trade(deploy_broker):
         "time": "2024-01-01T12:00:00Z",
     })
 
-    async with TestKafkaBroker(broker):
-        client = RouterServiceClient(broker, router)
-        ticker_json = (
-            '[{"product_id": "BTC-USD", "price": "500000.00", '
-            '"best_bid": "499500.00", "best_ask": "500500.00"}, '
-            '{"product_id": "SOL-USD", "price": "100.00", '
-            '"best_bid": "99.90", "best_ask": "100.10"}]'
-        )
-        response = await client.request(
+    ticker_json = (
+        '[{"product_id": "BTC-USD", "price": "500000.00", '
+        '"best_bid": "499500.00", "best_ask": "500500.00"}, '
+        '{"product_id": "SOL-USD", "price": "100.00", '
+        '"best_bid": "99.90", "best_ask": "100.10"}]'
+    )
+
+    async with TestKafkaBroker(client.broker):
+        await client.execute_node(
             user_prompt=(
                 "Here is the latest ticker information. You should view your "
                 "portfolio first before making any decisions to trade.\n"
@@ -339,9 +293,9 @@ async def test_autonomous_portfolio_check_and_trade(deploy_broker):
                 "best_ask = price you buy at.\n\n"
                 f"{ticker_json}"
             ),
+            topic=AGENT_INPUT_TOPIC,
+            timeout=45.0,
         )
-        final_msg = await asyncio.wait_for(response.get_final_response(), timeout=45.0)
-        assert isinstance(final_msg, ModelResponse)
 
     account = _account()
     assert account.trade_count > 0, "Agent should have executed at least one trade"

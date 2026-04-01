@@ -1,10 +1,10 @@
 {
   "$defs": {
-    "ChatNodeConfig": {
-      "description": "A ChatNode deployment that provides LLM inference to agents.",
+    "AgentConfig": {
+      "description": "An agent deployment combining model configuration with trading strategy.",
       "properties": {
         "name": {
-          "description": "Unique name for this ChatNode (becomes the Kafka topic suffix).",
+          "description": "Unique agent name (used as consumer group + identity).",
           "title": "Name",
           "type": "string"
         },
@@ -42,6 +42,12 @@
           "default": null,
           "description": "Reasoning effort level for supported models.",
           "title": "Reasoning Effort"
+        },
+        "strategy": {
+          "default": "default",
+          "description": "Trading strategy (selects system prompt).",
+          "title": "Strategy",
+          "type": "string"
         }
       },
       "required": [
@@ -49,7 +55,7 @@
         "provider",
         "model"
       ],
-      "title": "ChatNodeConfig",
+      "title": "AgentConfig",
       "type": "object"
     },
     "LLMProviderConfig": {
@@ -69,7 +75,7 @@
         },
         "default_model": {
           "default": "",
-          "description": "Default model ID when not overridden by a ChatNode.",
+          "description": "Default model ID when not overridden by an agent.",
           "title": "Default Model",
           "type": "string"
         }
@@ -117,16 +123,16 @@
       "additionalProperties": {
         "$ref": "#/$defs/LLMProviderConfig"
       },
-      "description": "Named LLM provider configurations. Keys are referenced by chat_nodes[].provider.",
+      "description": "Named LLM provider configurations. Keys are referenced by agents[].provider.",
       "title": "Llm Providers",
       "type": "object"
     },
-    "chat_nodes": {
-      "description": "ChatNode deployments. Each node targets a provider and model.",
+    "agents": {
+      "description": "Agent deployments. Each agent targets a provider, model, and strategy.",
       "items": {
-        "$ref": "#/$defs/ChatNodeConfig"
+        "$ref": "#/$defs/AgentConfig"
       },
-      "title": "Chat Nodes",
+      "title": "Agents",
       "type": "array"
     },
     "trading": {

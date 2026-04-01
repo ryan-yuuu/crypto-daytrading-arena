@@ -23,9 +23,7 @@ from typing import Any
 import httpx
 import websockets
 
-from calfkit.broker.broker import BrokerClient
-from calfkit.nodes.agent_router_node import AgentRouterNode
-from calfkit.runners.service_client import RouterServiceClient
+from calfkit import Client
 
 from arena.models import Candle, TIMEFRAMES
 from arena.price_book import CandleBook, PriceBook
@@ -48,6 +46,8 @@ BINANCE_INTERVAL_MAP = {
     300: "5m",
     900: "15m",
 }
+
+AGENT_INPUT_TOPIC = "agent_router.input"
 
 DEFAULT_SYMBOLS = [
     "BTCUSDT",
@@ -194,11 +194,11 @@ async def poll_rest(
 
 
 class BinanceKafkaConnector:
-    """Streams Binance ticker data to an AgentRouterNode.
+    """Streams Binance ticker data to an Agent via Kafka.
 
     Connects to the Binance Exchange WebSocket ticker stream
-    and invokes the configured AgentRouterNode with each price update
-    using fire-and-forget publishes via RouterServiceClient.
+    and invokes the configured Agent with each price update
+    using fire-and-forget publishes via Client.invoke_node().
 
     When min_publish_interval is set, incoming tickers are buffered per
     symbol. Only the latest data for each symbol is kept. A symbol's
@@ -208,16 +208,16 @@ class BinanceKafkaConnector:
 
     def __init__(
         self,
-        broker: BrokerClient,
-        router_node: AgentRouterNode,
+        client: Client,
+        agent_topic: str,
         symbols: list[str],
         min_publish_interval: float = 0.0,
         candle_book: CandleBook | None = None,
     ) -> None:
         if not symbols:
             raise ValueError("At least one symbol must be specified")
-        self._broker = broker
-        self._client = RouterServiceClient(broker, router_node, deps_type=dict)
+        self._client = client
+        self._agent_topic = agent_topic
         self._symbols = symbols
         self._min_interval = min_publish_interval
         self._running = True
@@ -228,7 +228,7 @@ class BinanceKafkaConnector:
 
     async def start(self) -> None:
         """Start the connector. Blocks until shutdown is triggered."""
-        await self._broker.start()
+        await self._client.broker.start()
         logger.info("Kafka broker connected")
 
         try:
@@ -252,7 +252,7 @@ class BinanceKafkaConnector:
                     )
                     await asyncio.sleep(RECONNECT_DELAY_SECONDS)
         finally:
-            await self._broker.close()
+            await self._client.close()
             logger.info("Kafka broker closed")
 
     def stop(self) -> None:
@@ -324,14 +324,15 @@ class BinanceKafkaConnector:
                 f"{self._candle_book.format_prompt(self._symbols)}"
             )
 
-        await self._client.invoke(
+        await self._client.invoke_node(
             user_prompt="\n".join(prompt_parts),
+            topic=self._agent_topic,
             deps={"invoked_at": time.time()},
         )
 
         summary = ", ".join(f"{t.product_id} @ ${t.price}" for t in batch)
         logger.info(
-            "Published batch of %d ticker(s) to router: %s",
+            "Published batch of %d ticker(s) to agent: %s",
             len(batch),
             summary,
         )
@@ -443,7 +444,7 @@ class BinanceKafkaConnector:
                         continue
 
                     self._latest[ticker.product_id] = ticker
-                    await self._broker.publish(ticker, PRICE_TOPIC)
+                    await self._client.broker.publish(ticker, PRICE_TOPIC)
             finally:
                 flush_task.cancel()
                 ping_task.cancel()
@@ -507,7 +508,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-async def run(args: argparse.Namespace, router_node: AgentRouterNode) -> None:
+async def run(args: argparse.Namespace, agent_topic: str = AGENT_INPUT_TOPIC) -> None:
     # Load symbols from config if not provided via CLI
     symbols = args.symbols
     if symbols is None:
@@ -521,10 +522,10 @@ async def run(args: argparse.Namespace, router_node: AgentRouterNode) -> None:
             symbols = list(DEFAULT_SYMBOLS)
 
     candle_book = CandleBook(parse_row=parse_binance_candle)
-    broker = BrokerClient(bootstrap_servers=args.bootstrap_servers)
+    client = Client.connect(args.bootstrap_servers)
     connector = BinanceKafkaConnector(
-        broker=broker,
-        router_node=router_node,
+        client=client,
+        agent_topic=agent_topic,
         symbols=symbols,
         min_publish_interval=args.min_interval,
         candle_book=candle_book,
@@ -535,18 +536,15 @@ async def run(args: argparse.Namespace, router_node: AgentRouterNode) -> None:
         loop.add_signal_handler(sig, connector.stop)
 
     logger.info("Starting Binance -> Kafka connector")
-    logger.info("  Router topic:  %s", router_node.subscribed_topic)
-    logger.info("  Broker:        %s", args.bootstrap_servers)
-    logger.info("  Symbols:       %s", ", ".join(symbols))
-    logger.info("  Min interval:  %ss", args.min_interval)
+    logger.info("  Agent topic: %s", agent_topic)
+    logger.info("  Broker:      %s", args.bootstrap_servers)
+    logger.info("  Symbols:     %s", ", ".join(symbols))
+    logger.info("  Min interval: %ss", args.min_interval)
 
     await connector.start()
 
 
 def main() -> None:
-    from calfkit.nodes.chat_node import ChatNode
-    from calfkit.stores.in_memory import InMemoryMessageHistoryStore
-
     args = parse_args()
     logging.basicConfig(
         level=getattr(logging, args.log_level),
@@ -554,7 +552,7 @@ def main() -> None:
         datefmt="%H:%M:%S",
     )
 
-    asyncio.run(run(args, AgentRouterNode()))
+    asyncio.run(run(args))
 
 
 if __name__ == "__main__":

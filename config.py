@@ -43,19 +43,20 @@ class LLMProviderConfig(BaseModel):
 
     api_key: str = Field("", description="API key or ${ENV_VAR} reference.")
     base_url: str = Field("", description="Base URL for the provider's API.")
-    default_model: str = Field("", description="Default model ID when not overridden by a ChatNode.")
+    default_model: str = Field("", description="Default model ID when not overridden by an agent.")
 
 
-class ChatNodeConfig(BaseModel):
-    """A ChatNode deployment that provides LLM inference to agents."""
+class AgentConfig(BaseModel):
+    """An agent deployment combining model configuration with trading strategy."""
 
-    name: str = Field(description="Unique name for this ChatNode (becomes the Kafka topic suffix).")
+    name: str = Field(description="Unique agent name (used as consumer group + identity).")
     provider: str = Field(description="Key into llm_providers (e.g. 'openai', 'openrouter').")
     model: str = Field(description="Model ID to use (e.g. 'gpt-5-nano', 'anthropic/claude-sonnet-4').")
     max_workers: int = Field(1, description="Concurrent inference workers.", ge=1)
     reasoning_effort: Literal["low", "medium", "high"] | None = Field(
         None, description="Reasoning effort level for supported models."
     )
+    strategy: str = Field("default", description="Trading strategy (selects system prompt).")
 
 
 class TradingConfig(BaseModel):
@@ -79,11 +80,11 @@ class ArenaConfig(BaseModel):
 
     llm_providers: dict[str, LLMProviderConfig] = Field(
         default_factory=dict,
-        description="Named LLM provider configurations. Keys are referenced by chat_nodes[].provider.",
+        description="Named LLM provider configurations. Keys are referenced by agents[].provider.",
     )
-    chat_nodes: list[ChatNodeConfig] = Field(
+    agents: list[AgentConfig] = Field(
         default_factory=list,
-        description="ChatNode deployments. Each node targets a provider and model.",
+        description="Agent deployments. Each agent targets a provider, model, and strategy.",
     )
     trading: TradingConfig = Field(
         default_factory=TradingConfig,
@@ -94,11 +95,11 @@ class ArenaConfig(BaseModel):
         """Get configuration for a specific provider."""
         return self.llm_providers.get(provider_name)
 
-    def get_chat_node_config(self, name: str) -> ChatNodeConfig | None:
-        """Get configuration for a specific chat node."""
-        for node in self.chat_nodes:
-            if node.name == name:
-                return node
+    def get_agent_config(self, name: str) -> AgentConfig | None:
+        """Get configuration for a specific agent."""
+        for agent in self.agents:
+            if agent.name == name:
+                return agent
         return None
 
 

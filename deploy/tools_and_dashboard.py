@@ -5,8 +5,7 @@ import logging
 from dotenv import load_dotenv
 from rich.live import Live
 
-from calfkit.broker.broker import BrokerClient
-from calfkit.runners.service import NodesService
+from calfkit import Client, Worker
 from exchanges import (
     PRICE_TOPIC,
     TickerMessage,
@@ -73,17 +72,18 @@ async def main():
     print("=" * 50)
 
     print(f"\nConnecting to Kafka broker at {args.bootstrap_servers}...")
-    broker = BrokerClient(bootstrap_servers=args.bootstrap_servers)
-    service = NodesService(broker)
+    client = Client.connect(args.bootstrap_servers)
+
+    tools = [execute_trade, get_portfolio, calculator]
+    worker = Worker(client, nodes=tools)
 
     # ── Tool nodes ───────────────────────────────────────────────
     print("\nRegistering trading tool nodes...")
-    for tool in (execute_trade, get_portfolio, calculator):
-        service.register_node(tool)
-        print(f"  - {tool.tool_schema.name} (topic: {tool.subscribed_topic})")
+    for tool in tools:
+        print(f"  - {tool.tool_schema.name} (topic: {tool.subscribe_topics[0]})")
 
     # ── Price subscriber ─────────────────────────────────────────
-    @broker.subscriber(PRICE_TOPIC, group_id="tools-dashboard")
+    @client.broker.subscriber(PRICE_TOPIC, group_id="tools-dashboard")
     async def handle_price_update(ticker: TickerMessage) -> None:
         price_book.update(ticker.model_dump())
         view.rerender()
@@ -104,7 +104,7 @@ async def main():
             view.attach_live(live)
             if recorder is not None:
                 recorder.start_snapshot_loop(store, interval=args.snapshot_interval)
-            await service.run()
+            await worker.run()
     finally:
         if recorder is not None:
             await recorder.close()

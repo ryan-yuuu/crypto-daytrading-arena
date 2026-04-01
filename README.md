@@ -24,15 +24,16 @@ If you find this project interesting or useful, please consider:
 
 ```
                          ┌──────────────────┐
-                         │ Agent Router(s)  │
+                         │    Agent(s)      │
+                         │ (LLM Inference)  │
                          └──────────────────┘
                                   ▲
                                   │
                                   ▼
-Live Market          ┌────────────────┐      ┌──────────────────┐
-Data Stream  ──▶     │  Kafka Broker  │◀────▶│  ChatNode(s)     │
-                     └────────────────┘      │  (LLM Inference) │
-                                  ▲          └──────────────────┘
+Live Market          ┌────────────────┐
+Data Stream  ──▶     │  Kafka Broker  │
+                     └────────────────┘
+                                  ▲
                                   │
                                   ▼
                        ┌────────────────────────┐
@@ -44,7 +45,7 @@ Data Stream  ──▶     │  Kafka Broker  │◀────▶│  ChatNode
 Each box (or node) is an independent process communicating with eachother. Each node can run on the same machine, on separate servers, or across different cloud regions.
 
 Key design points:
-- **Per-agent model selection**: Each agent targets a named stateless ChatNode, so different agents can use different LLMs or share LLMs.
+- **Per-agent model selection**: Each agent embeds its own model client, so different agents can use different LLMs with different providers.
 - **Fan-out via consumer groups**: Every agent independently receives every market data update, with no replicated work.
 - **Shared tools via ToolContext**: A single deployed set of trading tools serves all agents — each tool resolves the calling agent's identity at runtime.
 - **Dynamic agent accounts**: Agents appear on the dashboard automatically on their first trade — no pre-registration needed.
@@ -151,40 +152,33 @@ uv run python -m deploy.tools_and_dashboard --bootstrap-servers <broker-url>
 
 <br>
 
-### 3. Deploy a ChatNode (LLM inference)
+### 3. Deploy agents
 
-Deploy a ChatNode for each LLM model you'd like to run.
-Note: ChatNodes are stateless so multiple agents can share the same ChatNode.
+Deploy an agent with an embedded model client and a trading strategy. Each agent runs its own LLM inference. See `arena/strategies.py` for the full system prompts.
 
 ```bash
 # OpenAI model
-uv run python -m deploy.chat_node \
-    --name <unique-name-of-chatnode> --model-id <openai-model-id> --bootstrap-servers <broker-url> \
-    --reasoning-effort <optional-reasoning-level> --api-key <api-key>
-
-# Or, any OpenAI-compatible provider (e.g. DeepInfra, Gemini, etc.)
-# uv run python -m deploy.chat_node \
-#     --name <unique-name-of-chatnode> --model-id <model-id> --bootstrap-servers <broker-url> \
-#     --base-url <llm-provider-base-url> --reasoning-effort <optional-reasoning-level> --api-key <api-key>
-```
-
-<br>
-
-### 4. Deploy agents
-
-Deploy an agent that targets a ChatNode you define by name and uses a trading strategy you can edit in `arena/strategies.py`. See `arena/strategies.py` for the full system prompts.
-
-```bash
 uv run python -m deploy.router_node \
-    --name <unique-agent-name> --chat-node-name <name-of-chatnode> \
+    --name <unique-agent-name> --model-id <openai-model-id> \
     --strategy <strategy> --bootstrap-servers <broker-url>
+
+# Or, any OpenAI-compatible provider (e.g. DeepInfra, OpenRouter, etc.)
+# uv run python -m deploy.router_node \
+#     --name <unique-agent-name> --model-id <model-id> \
+#     --base-url <llm-provider-base-url> --api-key <api-key> \
+#     --strategy <strategy> --bootstrap-servers <broker-url>
+
+# Or, load agent config from config.json
+# uv run python -m deploy.router_node \
+#     --from-config <agent-name> --strategy <strategy> \
+#     --bootstrap-servers <broker-url>
 ```
 
-Once agent routers are deployed, market data flows to the agents and trades should hydrate the dashboard soon.
+Once agents are deployed, market data flows to them and trades should hydrate the dashboard soon.
 
 <br>
 
-### 5. (Optional) Start the response viewer
+### 4. (Optional) Start the response viewer
 
 A live dashboard that shows all agent activity, such as tool calls, text responses (agent reasoning), and tool results, as they happen.
 

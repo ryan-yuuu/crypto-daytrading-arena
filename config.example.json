@@ -14,18 +14,20 @@
       "default_model": "anthropic/claude-sonnet-4"
     }
   },
-  "chat_nodes": [
+  "agents": [
     {
       "name": "gpt-5-nano",
       "provider": "openai",
       "model": "gpt-5-nano",
-      "max_workers": 1
+      "max_workers": 1,
+      "strategy": "default"
     },
     {
       "name": "claude",
       "provider": "openrouter",
       "model": "anthropic/claude-sonnet-4",
-      "max_workers": 1
+      "max_workers": 1,
+      "strategy": "default"
     }
   ],
   "trading": {

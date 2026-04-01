@@ -11,7 +11,7 @@ Example:
 
 Prerequisites:
     - Kafka broker running
-    - At least one agent router publishing to agent_router.output
+    - At least one agent publishing to agent_router.output
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from dotenv import load_dotenv
+from faststream import FastStream
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
@@ -37,8 +38,8 @@ from calfkit._vendor.pydantic_ai.messages import (
     ToolCallPart,
     ToolReturnPart,
 )
-from calfkit.broker.broker import BrokerClient
-from calfkit.models.event_envelope import EventEnvelope
+from calfkit import Client
+from calfkit.models.envelope import Envelope
 
 load_dotenv()
 
@@ -169,6 +170,20 @@ def _truncate(s: str, max_len: int) -> str:
     return s[: max_len - 1] + "\u2026"
 
 
+def _extract_agent_name(envelope: Envelope) -> str:
+    """Best-effort extraction of agent name from the envelope's call stack."""
+    try:
+        frame = envelope.internal_workflow_state.current_frame
+        # The callback_topic typically contains the agent's node_id
+        # (e.g. "momentum.private.return" or "agent_router.input")
+        topic = frame.callback_topic or frame.target_topic
+        if topic:
+            return topic.split(".")[0]
+    except Exception:
+        pass
+    return "unknown"
+
+
 # ── CLI ──────────────────────────────────────────────────────────
 
 
@@ -203,17 +218,18 @@ async def main() -> None:
     print("=" * 50)
 
     print(f"\nConnecting to Kafka broker at {args.bootstrap_servers}...")
-    broker = BrokerClient(bootstrap_servers=args.bootstrap_servers)
+    client = Client.connect(args.bootstrap_servers)
 
-    @broker.subscriber("agent_router.output", group_id="activity-viewer")
-    async def handle_agent_activity(envelope: EventEnvelope) -> None:
-        last_msg = envelope.latest_message_in_history
-        if last_msg is None:
+    @client.broker.subscriber("agent_router.output", group_id="activity-viewer")
+    async def handle_agent_activity(envelope: Envelope) -> None:
+        message_history = envelope.context.state.message_history
+        if not message_history:
             return
 
-        agent_name = envelope.agent_name or "unknown"
-        trace_id = envelope.trace_id
-        history_len = len(envelope.message_history)
+        last_msg = message_history[-1]
+        agent_name = _extract_agent_name(envelope)
+        trace_id = envelope.context.deps.correlation_id
+        history_len = len(message_history)
 
         if isinstance(last_msg, ModelResponse):
             tool_calls = [p for p in last_msg.parts if isinstance(p, ToolCallPart)]
@@ -257,9 +273,10 @@ async def main() -> None:
 
     print("\nStarting activity viewer (subscribing to agent_router.output)...")
 
+    app = FastStream(client.broker)
     with Live(view._build_layout(), auto_refresh=False, screen=True) as live:
         view.attach_live(live)
-        await broker.run_app()
+        await app.run()
 
 
 if __name__ == "__main__":
