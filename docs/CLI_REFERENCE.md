@@ -4,7 +4,7 @@
 
 The trading arena supports a JSON configuration file (`config.json` by default) for managing:
 - Multiple LLM providers (OpenAI, OpenRouter)
-- Multiple ChatNodes with different providers/models
+- Multiple agents with different providers/models/strategies
 - Exchange selection and trading pairs for Binance and Coinbase
 
 To get started, copy the example and fill in your API keys:
@@ -32,18 +32,20 @@ For the full config schema with all fields, types, and defaults, see [`config.sc
       "default_model": "anthropic/claude-sonnet-4"
     }
   },
-  "chat_nodes": [
+  "agents": [
     {
       "name": "gpt-5-nano",
       "provider": "openai",
       "model": "gpt-5-nano",
-      "max_workers": 1
+      "max_workers": 1,
+      "strategy": "default"
     },
     {
       "name": "claude",
       "provider": "openrouter",
       "model": "anthropic/claude-sonnet-4",
-      "max_workers": 1
+      "max_workers": 1,
+      "strategy": "default"
     }
   ],
   "trading": {
@@ -62,20 +64,20 @@ For the full config schema with all fields, types, and defaults, see [`config.sc
 
 ---
 
-## deploy/chat_node.py
+## deploy/router_node.py
 
-Deploy a ChatNode for LLM inference. Can use explicit CLI args or load from config.
+Deploy an agent with an embedded model client and trading strategy. Can use explicit CLI args or load from config.
 
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
-| `--name` | Yes* | — | ChatNode name (becomes topic `ai_prompted.<name>`) |
+| `--name` | Yes* | — | Agent name (consumer group + identity) |
 | `--model-id` | Yes* | — | Model ID (e.g. `gpt-5-nano`, `deepseek-chat`) |
+| `--strategy` | Yes | — | Trading strategy: `default`, `momentum`, `brainrot`, or `scalper` |
 | `--bootstrap-servers` | Yes | — | Kafka broker address |
 | `--base-url` | No | OpenAI | Base URL for OpenAI-compatible providers |
 | `--api-key` | No | `$OPENAI_API_KEY` | API key for the provider |
-| `--max-workers` | No | `1` | Concurrent inference workers |
 | `--reasoning-effort` | No | `None` | For reasoning models (e.g. `"low"`) |
-| `--from-config` | No | — | Load ChatNode config by name from config file |
+| `--from-config` | No | — | Load agent config by name from config file |
 | `--config-path` | No | `config.json` | Path to config file |
 
 \* Required unless using `--from-config`
@@ -83,32 +85,23 @@ Deploy a ChatNode for LLM inference. Can use explicit CLI args or load from conf
 **Examples:**
 ```bash
 # Explicit configuration
-uv run python -m deploy.chat_node \
-    --name gpt-5-nano --model-id gpt-5-nano \
-    --bootstrap-servers localhost:9092 \
+uv run python -m deploy.router_node \
+    --name momentum --model-id gpt-5-nano \
+    --strategy momentum --bootstrap-servers localhost:9092 \
     --api-key $OPENAI_API_KEY
 
 # Load from config file
-uv run python -m deploy.chat_node \
-    --from-config gpt-5-nano \
+uv run python -m deploy.router_node \
+    --from-config gpt-5-nano --strategy default \
     --bootstrap-servers localhost:9092
 
 # Using OpenRouter (for Claude and other non-OpenAI models)
-uv run python -m deploy.chat_node \
-    --name claude --model-id anthropic/claude-sonnet-4 \
+uv run python -m deploy.router_node \
+    --name claude-agent --model-id anthropic/claude-sonnet-4 \
     --base-url https://openrouter.ai/api/v1 \
     --api-key $OPENROUTER_API_KEY \
-    --bootstrap-servers localhost:9092
+    --strategy default --bootstrap-servers localhost:9092
 ```
-
-## deploy/router_node.py
-
-| Flag | Required | Default | Description |
-|------|----------|---------|-------------|
-| `--name` | Yes | — | Agent name (consumer group + identity) |
-| `--chat-node-name` | Yes | — | Name of the deployed ChatNode to target |
-| `--strategy` | Yes | — | Trading strategy: `default`, `momentum`, `brainrot`, or `scalper` |
-| `--bootstrap-servers` | Yes | — | Kafka broker address |
 
 ---
 
